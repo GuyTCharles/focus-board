@@ -664,24 +664,3 @@ body {
         width: 100%;
     }
 }
-
-/* Very small-screen adaptations */
-@media (max-width: 415px) {
-    .hero-title-row {
-        flex-direction: row;
-        align-items: center;
-        justify-content: flex-start;
-        gap: 14px;
-    }
-
-    .hero-copy,
-    .hero-subtitle {
-        padding-right: 0;
-    }
-
-    .theme-toggle {
-        --theme-toggle-size: 36px;
-        position: static;
-        transform: none !important;
-    }
-}
