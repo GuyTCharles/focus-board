@@ -2,8 +2,12 @@
     // Persistent keys and static configuration.
     const STORAGE_KEY = "tasks";
     const THEME_KEY = "focusboard-theme";
+    const VIEW_STATE_KEY = "focusboard-view-state";
+    const COMPOSER_DRAFT_KEY = "focusboard-composer-draft";
     const IOS_DATE_PLACEHOLDER = "mm / dd / yyyy";
+    const STATUS_FILTERS = ["all", "active", "completed"];
     const PRIORITY_LEVELS = ["High", "Medium", "Low"];
+    const SORT_MODES = ["newest", "oldest", "priority-desc", "priority-asc", "due-soon", "due-late"];
     const PRIORITY_RANK = {
         High: 3,
         Medium: 2,
@@ -37,6 +41,7 @@
     const priorityFilterSelect = document.querySelector("#priority-filter");
     const sortModeSelect = document.querySelector("#sort-mode");
     const themeToggle = document.querySelector("#theme-toggle");
+    const composerPriorityInputs = Array.from(document.querySelectorAll("input[name='priority']"));
 
     // UI state for filtering and sorting.
     let activeFilter = "all";
@@ -52,9 +57,61 @@
         return PRIORITY_LEVELS.includes(priority) ? priority : "High";
     }
 
+    // Keep status filter values inside the supported set.
+    function normalizeActiveFilter(filter) {
+        return STATUS_FILTERS.includes(filter) ? filter : "all";
+    }
+
+    // Keep toolbar priority filter values inside the supported set.
+    function normalizePriorityFilter(priorityFilter) {
+        return priorityFilter === "all" || PRIORITY_LEVELS.includes(priorityFilter) ? priorityFilter : "all";
+    }
+
+    // Keep sort mode values inside the supported set.
+    function normalizeSortMode(mode) {
+        return SORT_MODES.includes(mode) ? mode : "newest";
+    }
+
     // Trim and collapse repeated whitespace.
     function normalizeDescription(value) {
         return value.replace(/\s+/g, " ").trim();
+    }
+
+    // Safe storage access keeps the app usable when storage is unavailable.
+    function getStorageItem(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Safe storage writes avoid blocking the UI on storage quota/privacy errors.
+    function setStorageItem(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (error) {}
+    }
+
+    // Safe storage removals let the app clear stale state without hard failures.
+    function removeStorageItem(key) {
+        try {
+            localStorage.removeItem(key);
+        } catch (error) {}
+    }
+
+    // Read JSON blobs from localStorage and ignore malformed payloads.
+    function getStoredJSON(key) {
+        const storedValue = getStorageItem(key);
+        if (!storedValue) {
+            return null;
+        }
+
+        try {
+            return JSON.parse(storedValue);
+        } catch (error) {
+            return null;
+        }
     }
 
     // Keep only ISO date values (YYYY-MM-DD).
@@ -154,6 +211,20 @@
 
         const [year, month, day] = normalizedDate.split("-");
         return `${month}/${day}/${year}`;
+    }
+
+    // Read the currently selected composer priority radio.
+    function getSelectedComposerPriority() {
+        const selectedInput = composerPriorityInputs.find(input => input.checked);
+        return normalizePriority(selectedInput ? selectedInput.value : "High");
+    }
+
+    // Restore the composer priority radio selection from storage.
+    function setSelectedComposerPriority(priority) {
+        const normalizedPriority = normalizePriority(priority);
+        composerPriorityInputs.forEach(input => {
+            input.checked = input.value === normalizedPriority;
+        });
     }
 
     // Detect iOS/macOS touch Safari where empty date inputs can appear blank.
@@ -323,15 +394,8 @@
 
     // Rehydrate tasks from localStorage safely.
     function loadTasks() {
-        let storedTasks = [];
-        try {
-            const parsedTasks = JSON.parse(localStorage.getItem(STORAGE_KEY));
-            if (Array.isArray(parsedTasks)) {
-                storedTasks = parsedTasks;
-            }
-        } catch (error) {
-            storedTasks = [];
-        }
+        const parsedTasks = getStoredJSON(STORAGE_KEY);
+        const storedTasks = Array.isArray(parsedTasks) ? parsedTasks : [];
 
         return storedTasks
             .filter(task => task && typeof task.description === "string")
@@ -350,7 +414,79 @@
 
     // Persist current in-memory tasks.
     function saveTasks() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+        setStorageItem(STORAGE_KEY, JSON.stringify(tasks));
+    }
+
+    // Restore toolbar filters/sort from localStorage.
+    function loadViewState() {
+        const storedState = getStoredJSON(VIEW_STATE_KEY) || {};
+        return {
+            activeFilter: normalizeActiveFilter(storedState.activeFilter),
+            activePriorityFilter: normalizePriorityFilter(storedState.activePriorityFilter),
+            sortMode: normalizeSortMode(storedState.sortMode)
+        };
+    }
+
+    // Persist toolbar filters/sort so the task view comes back as the user left it.
+    function saveViewState() {
+        setStorageItem(VIEW_STATE_KEY, JSON.stringify({
+            activeFilter,
+            activePriorityFilter,
+            sortMode
+        }));
+    }
+
+    // Restore any in-progress task draft from localStorage.
+    function loadComposerDraft() {
+        const storedDraft = getStoredJSON(COMPOSER_DRAFT_KEY) || {};
+        const maxDraftLength = Number(taskInput.maxLength) || 180;
+        const normalizedDueDate = normalizeDueDate(storedDraft.dueDate);
+
+        return {
+            description: typeof storedDraft.description === "string" ? storedDraft.description.slice(0, maxDraftLength) : "",
+            dueDate: isPastDate(normalizedDueDate) ? "" : normalizedDueDate,
+            priority: normalizePriority(storedDraft.priority)
+        };
+    }
+
+    // Persist the current composer state until submit or explicit site-data removal.
+    function saveComposerDraft() {
+        const draft = {
+            description: taskInput.value.slice(0, Number(taskInput.maxLength) || 180),
+            dueDate: getDateInputISOValue(taskDueDateInput),
+            priority: getSelectedComposerPriority()
+        };
+
+        if (isPastDate(draft.dueDate)) {
+            draft.dueDate = "";
+        }
+
+        if (!draft.description && !draft.dueDate && draft.priority === "High") {
+            removeStorageItem(COMPOSER_DRAFT_KEY);
+            return;
+        }
+
+        setStorageItem(COMPOSER_DRAFT_KEY, JSON.stringify(draft));
+    }
+
+    // Apply stored toolbar state back onto the controls.
+    function restoreViewState() {
+        const storedState = loadViewState();
+        activeFilter = storedState.activeFilter;
+        activePriorityFilter = storedState.activePriorityFilter;
+        sortMode = storedState.sortMode;
+        priorityFilterSelect.value = activePriorityFilter;
+        sortModeSelect.value = sortMode;
+        updateFilterButtons();
+    }
+
+    // Apply the saved composer draft back onto the form controls.
+    function restoreComposerDraft() {
+        const storedDraft = loadComposerDraft();
+        taskInput.value = storedDraft.description;
+        taskDueDateInput.value = storedDraft.dueDate;
+        taskDueDateInput.dataset.isoDate = storedDraft.dueDate;
+        setSelectedComposerPriority(storedDraft.priority);
     }
 
     // Refresh task counters (total/active/done).
@@ -618,6 +754,7 @@
         }
 
         saveTasks();
+        saveViewState();
         renderTasks();
         scrollToFirstTask();
         return true;
@@ -698,12 +835,12 @@
         themeToggle.setAttribute("aria-pressed", resolvedTheme === "dark" ? "true" : "false");
         themeToggle.setAttribute("aria-label", nextThemeLabel);
         themeToggle.setAttribute("title", nextThemeLabel);
-        localStorage.setItem(THEME_KEY, resolvedTheme);
+        setStorageItem(THEME_KEY, resolvedTheme);
     }
 
     // Initialize theme from localStorage, then system preference fallback.
     function initializeTheme() {
-        const storedTheme = localStorage.getItem(THEME_KEY);
+        const storedTheme = getStorageItem(THEME_KEY);
         if (storedTheme === "dark" || storedTheme === "light") {
             applyTheme(storedTheme);
             return;
@@ -727,7 +864,9 @@
             taskInput.value = "";
             taskDueDateInput.value = "";
             taskDueDateInput.dataset.isoDate = "";
+            setSelectedComposerPriority("High");
             syncDateInputPresentation(taskDueDateInput, IOS_DATE_PLACEHOLDER);
+            saveComposerDraft();
             taskInput.focus();
         }
     });
@@ -737,6 +876,7 @@
         button.addEventListener("click", function () {
             activeFilter = this.dataset.filter;
             updateFilterButtons();
+            saveViewState();
             renderTasks();
         });
     });
@@ -744,12 +884,14 @@
     // Priority filter dropdown.
     priorityFilterSelect.addEventListener("change", function () {
         activePriorityFilter = this.value;
+        saveViewState();
         renderTasks();
     });
 
     // Sort mode dropdown.
     sortModeSelect.addEventListener("change", function () {
         sortMode = this.value;
+        saveViewState();
         renderTasks();
     });
 
@@ -760,11 +902,22 @@
     });
 
     // Initial boot sequence.
-    activePriorityFilter = priorityFilterSelect.value;
-    sortMode = sortModeSelect.value;
-    updateFilterButtons();
     applyMinDateConstraint(taskDueDateInput);
+    restoreComposerDraft();
     applyDateInputFallback(taskDueDateInput);
+    restoreViewState();
     initializeTheme();
     renderTasks();
+
+    // Draft listeners are attached after iOS fallback setup so saved dates use normalized values.
+    taskInput.addEventListener("input", saveComposerDraft);
+    taskDueDateInput.addEventListener("input", saveComposerDraft);
+    taskDueDateInput.addEventListener("change", saveComposerDraft);
+    taskDueDateInput.addEventListener("blur", saveComposerDraft);
+    composerPriorityInputs.forEach(input => {
+        input.addEventListener("change", saveComposerDraft);
+    });
+
+    saveComposerDraft();
+    saveViewState();
 })();
