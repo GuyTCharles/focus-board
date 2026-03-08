@@ -708,6 +708,17 @@ body {
     font-size: 0.7rem;
 }
 
+.apple-device .task-meta .task-due-date,
+.apple-device .task-meta .time-field--task {
+    width: 240px;
+    max-width: 100%;
+    flex: 0 1 240px;
+}
+
+.apple-device .task-meta .task-due-time {
+    width: 100%;
+}
+
 /* Completed task visual state */
 .task.done .task-desc {
     text-decoration: line-through;
