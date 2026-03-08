@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Focus Board</title>
     <link rel="icon" type="image/png" href="web-icon.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=8">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Focus Board">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -47,7 +47,7 @@
             <p class="hero-subtitle">Plan with clarity, execute faster, and keep momentum.</p>
         </header>
 
-        <!-- Composer: create a task with optional due date and priority -->
+        <!-- Composer: create a task with optional due date, optional time, and priority -->
         <section class="panel composer-panel">
             <form id="new-task-form" autocomplete="off">
                 <label class="sr-only" for="new-task-input">Task description</label>
@@ -57,24 +57,30 @@
                     placeholder="Add a task you want to complete"
                     maxlength="180"
                 >
-                <label class="sr-only" for="new-task-due-date">Due date</label>
-                <input type="date" id="new-task-due-date">
+                <div class="composer-schedule">
+                    <label class="sr-only" for="new-task-due-date">Due date</label>
+                    <input type="date" id="new-task-due-date">
+                    <label class="sr-only" for="new-task-due-time">Due time (optional)</label>
+                    <input type="time" id="new-task-due-time" aria-label="Due time (optional)">
+                </div>
 
                 <div class="composer-footer">
                     <fieldset class="priority-group" aria-label="Task priority">
                         <legend>Priority</legend>
-                        <label class="priority-chip">
-                            <input type="radio" name="priority" value="High" checked>
-                            <span>High</span>
-                        </label>
-                        <label class="priority-chip">
-                            <input type="radio" name="priority" value="Medium">
-                            <span>Medium</span>
-                        </label>
-                        <label class="priority-chip">
-                            <input type="radio" name="priority" value="Low">
-                            <span>Low</span>
-                        </label>
+                        <div class="priority-options">
+                            <label class="priority-chip">
+                                <input type="radio" name="priority" value="High" checked>
+                                <span>High</span>
+                            </label>
+                            <label class="priority-chip">
+                                <input type="radio" name="priority" value="Medium">
+                                <span>Medium</span>
+                            </label>
+                            <label class="priority-chip">
+                                <input type="radio" name="priority" value="Low">
+                                <span>Low</span>
+                            </label>
+                        </div>
                     </fieldset>
 
                     <button type="submit" class="btn btn-primary">Add Task</button>
@@ -126,9 +132,11 @@
             </div>
 
             <ul id="tasks-list" class="tasks-list" aria-live="polite"></ul>
-            <p id="empty-state" class="empty-state">No tasks yet. Add your task above.</p>
+            <p id="empty-state" class="empty-state">No tasks yet. Add your first task above.</p>
         </section>
     </main>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+    <div id="celebration-layer" class="celebration-layer" aria-hidden="true"></div>
     <!-- App behavior -->
     <script src="app.js"></script>
 </body>
