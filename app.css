@@ -759,11 +759,11 @@ body {
     }
 }
 
-/* Apple iPhone */
+/* iPhone */
 @media (max-width: 520px) {
     .apple-device .task-meta .date-field--task {
-        width: 155px;
-        flex: 0 1 155px;
+        width: 160px;
+        flex: 0 1 160px;
     }
 
     .apple-device .task-meta .time-field--task {
@@ -772,7 +772,7 @@ body {
     }
 }
 
-/* Apple iPad */
+/* iPad */
 @media (min-width: 521px) {
     .apple-device .task-meta .date-field--task {
         width: 160px;
