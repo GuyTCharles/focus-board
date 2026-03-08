@@ -22,6 +22,12 @@
     --hero-border: rgba(255, 255, 255, 0.85);
     --hero-kicker: #0a7c70;
     --shadow-soft: 0 20px 45px rgba(19, 31, 46, 0.14);
+    --toast-surface: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.88));
+    --toast-success-surface: linear-gradient(160deg, rgba(231, 250, 246, 0.96), rgba(247, 252, 255, 0.92));
+    --toast-warning-surface: linear-gradient(160deg, rgba(255, 249, 237, 0.96), rgba(248, 251, 255, 0.92));
+    --toast-success-border: rgba(0, 163, 145, 0.28);
+    --toast-warning-border: rgba(221, 155, 47, 0.3);
+    --toast-shadow: 0 18px 36px rgba(19, 31, 46, 0.18);
     --radius-lg: 22px;
     --radius-md: 14px;
     --radius-sm: 10px;
@@ -50,6 +56,12 @@
     --hero-border: #3a4d66;
     --hero-kicker: #66e0cf;
     --shadow-soft: 0 20px 45px rgba(3, 8, 18, 0.5);
+    --toast-surface: linear-gradient(160deg, rgba(22, 34, 49, 0.98), rgba(18, 28, 40, 0.94));
+    --toast-success-surface: linear-gradient(160deg, rgba(18, 58, 58, 0.96), rgba(20, 34, 49, 0.95));
+    --toast-warning-surface: linear-gradient(160deg, rgba(62, 48, 22, 0.95), rgba(22, 34, 49, 0.96));
+    --toast-success-border: rgba(72, 211, 191, 0.38);
+    --toast-warning-border: rgba(255, 204, 115, 0.34);
+    --toast-shadow: 0 18px 36px rgba(3, 8, 18, 0.48);
 }
 
 /* Global reset */
@@ -199,6 +211,10 @@ body {
     .composer-schedule {
         grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
     }
+
+    .apple-device .composer-schedule {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
 }
 
 @media (max-width: 400px) {
@@ -220,6 +236,10 @@ body {
     .composer-schedule {
         grid-template-columns: 1fr;
         width: min(70%, 250px);
+    }
+
+    .apple-device .composer-schedule {
+        grid-template-columns: 1fr;
     }
     
     .composer-footer .btn-primary {
@@ -268,12 +288,16 @@ body {
 
 /* iOS date fallback: show visible placeholder when empty */
 #new-task-due-date.date-empty-fallback,
-.task-due-date.date-empty-fallback {
+.task-due-date.date-empty-fallback,
+#new-task-due-time.time-empty-fallback,
+.task-due-time.time-empty-fallback {
     color: var(--ink-muted);
 }
 
 #new-task-due-date.date-empty-fallback::placeholder,
-.task-due-date.date-empty-fallback::placeholder {
+.task-due-date.date-empty-fallback::placeholder,
+#new-task-due-time.time-empty-fallback::placeholder,
+.task-due-time.time-empty-fallback::placeholder {
     color: var(--ink-muted);
     opacity: 1;
 }
@@ -664,9 +688,8 @@ body {
     border: var(--stroke-thin) solid var(--panel-border);
     border-radius: 18px;
     padding: 14px;
-    background:
-        linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.88));
-    box-shadow: 0 18px 36px rgba(19, 31, 46, 0.18);
+    background: var(--toast-surface);
+    box-shadow: var(--toast-shadow);
     backdrop-filter: blur(12px);
     transition: opacity 180ms ease, transform 180ms ease;
 }
@@ -682,15 +705,13 @@ body {
 }
 
 .toast--success {
-    border-color: rgba(0, 163, 145, 0.28);
-    background:
-        linear-gradient(160deg, rgba(231, 250, 246, 0.96), rgba(247, 252, 255, 0.92));
+    border-color: var(--toast-success-border);
+    background: var(--toast-success-surface);
 }
 
 .toast--warning {
-    border-color: rgba(221, 155, 47, 0.3);
-    background:
-        linear-gradient(160deg, rgba(255, 249, 237, 0.96), rgba(248, 251, 255, 0.92));
+    border-color: var(--toast-warning-border);
+    background: var(--toast-warning-surface);
 }
 
 .toast-title {
