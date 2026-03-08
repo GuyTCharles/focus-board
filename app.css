@@ -235,7 +235,7 @@ body {
 @media (max-width: 420px) {
     .composer-schedule {
         grid-template-columns: 1fr;
-        width: min(70%, 250px);
+        width: min(64%, 220px);
     }
 
     .apple-device .composer-schedule {
