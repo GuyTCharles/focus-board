@@ -754,10 +754,11 @@ body {
     }
 
     .task-meta .time-field--task {
-        width: 152px;
-        flex: 0 1 152px;
+        width: 155px;
+        flex: 0 1 155px;
     }
 }
+
 
 /* iPhone */
 @media (max-width: 520px) {
