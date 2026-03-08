@@ -252,6 +252,16 @@ body {
         grid-template-columns: 1fr;
         align-items: stretch;
     }
+
+    #new-task-due-date,
+    #new-task-due-time {
+        height: 44px;
+        min-height: 44px;
+        border-radius: 11px;
+        padding-inline: 12px;
+        font-size: 0.92rem;
+        background: color-mix(in srgb, var(--surface-strong) 96%, #f4f7fb 4%);
+    }
 }
 
 #new-task-due-date {
@@ -264,10 +274,13 @@ body {
 
 #new-task-due-date,
 #new-task-due-time {
-    height: 58px;
-    min-height: 58px;
+    height: 48px;
+    min-height: 48px;
     padding-block: 0;
-    line-height: 1.2;
+    padding-inline: 14px;
+    line-height: 1.1;
+    border-radius: 12px;
+    font-size: 0.96rem;
 }
 
 #new-task-due-date::-webkit-date-and-time-value,
@@ -292,6 +305,14 @@ body {
 #new-task-due-time.time-empty-fallback,
 .task-due-time.time-empty-fallback {
     color: var(--ink-muted);
+    -webkit-text-fill-color: var(--ink-muted);
+}
+
+#new-task-due-date:not(.date-empty-fallback),
+#new-task-due-time:not(.time-empty-fallback),
+.task-due-date:not(.date-empty-fallback),
+.task-due-time:not(.time-empty-fallback) {
+    -webkit-text-fill-color: currentColor;
 }
 
 #new-task-due-date.date-empty-fallback::placeholder,
