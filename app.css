@@ -736,7 +736,7 @@ body {
     font-size: 0.7rem;
 }
 
-@media (min-width: 421px) {
+@media (min-width: 521px) {
     .task-meta .date-field--task {
         width: 185px;
         max-width: 100%;
@@ -755,7 +755,7 @@ body {
     }
 }
 
-@media (min-width: 420px) {
+@media (min-width: 520px) {
     .apple-device .task-meta .date-field--task,
     .apple-device .task-meta .time-field--task {
         width: 150px;
