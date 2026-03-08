@@ -57,6 +57,7 @@
     const taskForm = document.querySelector("#new-task-form");
     const taskInput = document.querySelector("#new-task-input");
     const taskDueDateInput = document.querySelector("#new-task-due-date");
+    const taskDueDateResetButton = document.querySelector("#new-task-due-date-reset");
     const taskDueTimeInput = document.querySelector("#new-task-due-time");
     const taskDueTimeResetButton = document.querySelector("#new-task-due-time-reset");
     const taskDueTimeField = taskDueTimeInput ? taskDueTimeInput.closest(".time-field") : null;
@@ -81,6 +82,7 @@
     document.documentElement.classList.toggle("apple-device", useIOSDateFallback);
     let overdueNoticeState = loadOverdueNoticeState();
     let lastTimedRefreshKey = getCurrentLocalMinuteKey();
+    let taskMetaLayoutFrame = 0;
 
     // In-memory state loaded once at startup.
     const tasks = loadTasks();
@@ -614,6 +616,20 @@
         syncTimeInputPresentation(input);
     }
 
+    // Clear the selected date so the task falls back to an unscheduled state.
+    function clearDateInputValue(input) {
+        if (!input) {
+            return;
+        }
+
+        input.dataset.isoDate = "";
+        input.value = "";
+
+        if (useIOSDateFallback) {
+            syncDateInputPresentation(input, IOS_DATE_PLACEHOLDER);
+        }
+    }
+
     // Explain why time cannot be entered until a due date exists.
     function promptForDateBeforeTime() {
         alert(DATE_REQUIRED_FOR_TIME_MESSAGE);
@@ -655,8 +671,20 @@
         button.disabled = !canClear;
     }
 
+    // Keep the clear-date control visible only when a real date is present.
+    function syncDateResetButton(button, input) {
+        if (!button || !input) {
+            return;
+        }
+
+        const canClear = Boolean(getDateInputISOValue(input));
+        button.hidden = !canClear;
+        button.disabled = !canClear;
+    }
+
     // Keep the composer time input, min-time rule, and clear button in sync.
     function syncComposerTimeInputState(preserveCurrentValue = false) {
+        syncDateResetButton(taskDueDateResetButton, taskDueDateInput);
         syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput, preserveCurrentValue);
         syncTimeFieldState(taskDueTimeField, taskDueTimeInput);
         syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
@@ -1180,6 +1208,58 @@
         return select;
     }
 
+    // Stack task schedule controls below an overdue badge only when the row cannot fit them side-by-side.
+    function syncTaskMetaScheduleLayout() {
+        if (!tasksList) {
+            return;
+        }
+
+        if (taskMetaLayoutFrame && typeof window.cancelAnimationFrame === "function") {
+            window.cancelAnimationFrame(taskMetaLayoutFrame);
+        }
+
+        const runLayoutCheck = function () {
+            taskMetaLayoutFrame = 0;
+            const metaRows = Array.from(tasksList.querySelectorAll(".task-meta"));
+
+            metaRows.forEach(meta => {
+                const overdueBadge = meta.querySelector(".due-badge.overdue");
+                const dateField = meta.querySelector(".date-field--task");
+                const timeField = meta.querySelector(".time-field--task");
+
+                if (!overdueBadge || !dateField || !timeField) {
+                    meta.classList.remove("task-meta--stack-schedule");
+                    return;
+                }
+
+                const metaStyles = window.getComputedStyle(meta);
+                const gap = parseFloat(metaStyles.columnGap || metaStyles.gap || "0") || 0;
+                const availableWidth = meta.clientWidth;
+
+                if (!availableWidth) {
+                    meta.classList.remove("task-meta--stack-schedule");
+                    return;
+                }
+
+                const requiredWidth =
+                    overdueBadge.getBoundingClientRect().width +
+                    dateField.getBoundingClientRect().width +
+                    timeField.getBoundingClientRect().width +
+                    (gap * 2) +
+                    1;
+
+                meta.classList.toggle("task-meta--stack-schedule", requiredWidth > availableWidth);
+            });
+        };
+
+        if (typeof window.requestAnimationFrame === "function") {
+            taskMetaLayoutFrame = window.requestAnimationFrame(runLayoutCheck);
+            return;
+        }
+
+        runLayoutCheck();
+    }
+
     // Create one task row and wire all row-level interactions.
     function createTaskItem(task, index) {
         const item = document.createElement("li");
@@ -1238,6 +1318,10 @@
             updateTaskDueDate(index, getDateInputISOValue(this));
         });
         applyDateInputFallback(dueDateInput);
+        const dueDateResetButton = createTimeResetButton(`Clear task ${index + 1} due date`, function () {
+            updateTaskDueDate(index, "");
+        });
+        syncDateResetButton(dueDateResetButton, dueDateInput);
 
         const dueTimeInput = document.createElement("input");
         dueTimeInput.type = "time";
@@ -1254,6 +1338,11 @@
         applyTimeInputFallback(dueTimeInput);
         syncTimeResetButton(dueTimeResetButton, dueTimeInput);
 
+        const dueDateField = document.createElement("div");
+        dueDateField.className = "date-field date-field--task";
+        dueDateField.appendChild(dueDateInput);
+        dueDateField.appendChild(dueDateResetButton);
+
         const dueTimeField = document.createElement("div");
         dueTimeField.className = "time-field time-field--task";
         dueTimeField.appendChild(dueTimeInput);
@@ -1261,9 +1350,13 @@
         attachTimeFieldPrompt(dueTimeField, dueTimeInput);
         syncTimeFieldState(dueTimeField, dueTimeInput);
 
+        const scheduleFields = document.createElement("div");
+        scheduleFields.className = "task-schedule-fields";
+        scheduleFields.appendChild(dueDateField);
+        scheduleFields.appendChild(dueTimeField);
+
         meta.appendChild(dueBadge);
-        meta.appendChild(dueDateInput);
-        meta.appendChild(dueTimeField);
+        meta.appendChild(scheduleFields);
 
         main.appendChild(descInput);
         main.appendChild(stateText);
@@ -1316,6 +1409,7 @@
 
         updateSummary();
         processOverdueTransitions();
+        syncTaskMetaScheduleLayout();
     }
 
     // Add a task from form values and reconcile active filters if needed.
@@ -1517,12 +1611,10 @@
 
         if (addTask(description, selectedPriority, dueDate, dueTime)) {
             taskInput.value = "";
-            taskDueDateInput.value = "";
-            taskDueDateInput.dataset.isoDate = "";
+            clearDateInputValue(taskDueDateInput);
             clearTimeInputValue(taskDueTimeInput);
             setSelectedComposerPriority("High");
             syncComposerTimeInputState();
-            syncDateInputPresentation(taskDueDateInput, IOS_DATE_PLACEHOLDER);
             saveComposerDraft();
             taskInput.focus();
         }
@@ -1565,6 +1657,13 @@
             saveComposerDraft();
         });
     }
+    if (taskDueDateResetButton) {
+        taskDueDateResetButton.addEventListener("click", function () {
+            clearDateInputValue(taskDueDateInput);
+            syncComposerTimeInputState();
+            saveComposerDraft();
+        });
+    }
     attachTimeFieldPrompt(taskDueTimeField, taskDueTimeInput);
 
     // Initial boot sequence.
@@ -1585,6 +1684,10 @@
 
     window.addEventListener("focus", function () {
         refreshTimedState(true);
+    });
+
+    window.addEventListener("resize", function () {
+        syncTaskMetaScheduleLayout();
     });
 
     document.addEventListener("visibilitychange", function () {
