@@ -164,9 +164,10 @@ body {
     gap: 14px;
 }
 
-/* Main task text and due-date controls */
+/* Main task text and schedule controls */
 #new-task-input,
-#new-task-due-date {
+#new-task-due-date,
+#new-task-due-time {
     width: 100%;
     border: var(--stroke-thin) solid var(--line);
     border-radius: var(--radius-md);
@@ -180,14 +181,89 @@ body {
 
 /* Shared focus ring for composer inputs */
 #new-task-input:focus-visible,
-#new-task-due-date:focus-visible {
+#new-task-due-date:focus-visible,
+#new-task-due-time:focus-visible {
     outline: none;
     border-color: #00a391;
     box-shadow: 0 0 0 4px rgba(0, 163, 145, 0.16);
 }
 
+.composer-schedule {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    align-items: stretch;
+}
+
+@media (max-width: 640px) {
+    .composer-schedule {
+        grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
+    }
+}
+
+@media (max-width: 400px) {
+    .priority-group {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        width: 100%;
+    }
+
+    .priority-options {
+        flex-direction: column;
+        align-items: flex-start;
+        margin-left: -8px;
+    }
+}
+
+@media (max-width: 420px) {
+    .composer-schedule {
+        grid-template-columns: 1fr;
+        width: min(70%, 250px);
+    }
+    
+    .composer-footer .btn-primary {
+        justify-self: end;
+    }
+}
+
+@media (max-width: 520px) {
+    .composer-footer {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+}
+
 #new-task-due-date {
-    max-width: 250px;
+    min-width: 0;
+}
+
+#new-task-due-time {
+    min-width: 0;
+}
+
+#new-task-due-date,
+#new-task-due-time {
+    height: 58px;
+    min-height: 58px;
+    padding-block: 0;
+    line-height: 1.2;
+}
+
+#new-task-due-date::-webkit-date-and-time-value,
+#new-task-due-time::-webkit-date-and-time-value {
+    text-align: left;
+}
+
+#new-task-due-date::-webkit-datetime-edit,
+#new-task-due-time::-webkit-datetime-edit {
+    padding: 0;
+}
+
+#new-task-due-time:disabled,
+.task-due-time:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
 }
 
 /* iOS date fallback: show visible placeholder when empty */
@@ -204,11 +280,10 @@ body {
 
 /* Footer area of composer form (priority + submit) */
 .composer-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
     gap: 14px;
-    flex-wrap: wrap;
 }
 
 /* Priority radio group and chip presentation */
@@ -216,6 +291,10 @@ body {
     border: 0;
     margin: 0;
     padding: 0;
+    min-width: 0;
+}
+
+.priority-options {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -224,7 +303,7 @@ body {
 
 .priority-group legend {
     padding: 0;
-    margin-bottom: 5px;
+    margin-bottom: 8px;
     font-size: 0.92rem;
     font-weight: 700;
 }
@@ -282,6 +361,7 @@ body {
 .btn-primary {
     background: linear-gradient(140deg, #00a08f, #007f73);
     color: #ffffff;
+    white-space: nowrap;
 }
 
 .btn-secondary {
@@ -504,7 +584,8 @@ body {
     background: #c74343;
 }
 
-.task-due-date {
+.task-due-date,
+.task-due-time {
     border: var(--stroke-thin) solid var(--line);
     border-radius: 8px;
     padding: 5px 8px;
@@ -533,7 +614,8 @@ body {
 #sort-mode:focus-visible,
 #priority-filter:focus-visible,
 .task-priority:focus-visible,
-.task-due-date:focus-visible {
+.task-due-date:focus-visible,
+.task-due-time:focus-visible {
     outline: none;
     border-color: #00a391;
     box-shadow: 0 0 0 3px rgba(0, 163, 145, 0.14);
@@ -546,6 +628,14 @@ body {
     justify-content: flex-end;
 }
 
+.task.is-spotlight {
+    border-color: rgba(0, 163, 145, 0.34);
+    box-shadow:
+        0 0 0 3px rgba(0, 163, 145, 0.14),
+        var(--shadow-soft);
+    animation: spotlight-pulse 820ms ease;
+}
+
 .priority-high {
     border-left-color: #d64a4a;
 }
@@ -556,6 +646,120 @@ body {
 
 .priority-low {
     border-left-color: #2b9f74;
+}
+
+.toast-region {
+    position: fixed;
+    top: calc(18px + env(safe-area-inset-top, 0));
+    right: 18px;
+    width: min(360px, calc(100vw - 24px));
+    display: grid;
+    gap: 10px;
+    z-index: 60;
+    pointer-events: none;
+}
+
+.toast {
+    pointer-events: auto;
+    border: var(--stroke-thin) solid var(--panel-border);
+    border-radius: 18px;
+    padding: 14px;
+    background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.88));
+    box-shadow: 0 18px 36px rgba(19, 31, 46, 0.18);
+    backdrop-filter: blur(12px);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toast.is-entering {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+}
+
+.toast.is-leaving {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+}
+
+.toast--success {
+    border-color: rgba(0, 163, 145, 0.28);
+    background:
+        linear-gradient(160deg, rgba(231, 250, 246, 0.96), rgba(247, 252, 255, 0.92));
+}
+
+.toast--warning {
+    border-color: rgba(221, 155, 47, 0.3);
+    background:
+        linear-gradient(160deg, rgba(255, 249, 237, 0.96), rgba(248, 251, 255, 0.92));
+}
+
+.toast-title {
+    margin: 0 0 4px;
+    font-size: 0.96rem;
+    font-weight: 700;
+}
+
+.toast-message {
+    margin: 0;
+    color: var(--ink-muted);
+    font-size: 0.88rem;
+    line-height: 1.45;
+}
+
+.toast-actions {
+    margin-top: 11px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.toast-action {
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+}
+
+.toast-dismiss {
+    border: 0;
+    background: transparent;
+    color: var(--ink-muted);
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 8px 4px;
+    cursor: pointer;
+}
+
+.toast-dismiss:hover {
+    color: var(--ink-strong);
+}
+
+.toast-dismiss:focus-visible {
+    outline: none;
+    color: var(--ink-strong);
+}
+
+.celebration-layer {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 55;
+}
+
+.confetti-piece {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0) - 28px);
+    width: 10px;
+    height: 18px;
+    border-radius: 3px;
+    background: var(--confetti-color);
+    box-shadow: 0 8px 18px rgba(19, 31, 46, 0.14);
+    opacity: 0;
+    transform: translate3d(0, -18px, 0) rotate(0deg);
+    animation: confetti-fall var(--confetti-duration) cubic-bezier(0.2, 0.75, 0.24, 1) forwards;
+    animation-delay: var(--confetti-delay);
 }
 
 /* Empty state message when no tasks are visible */
@@ -588,6 +792,7 @@ body {
         opacity: 0;
         transform: translateY(6px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -599,9 +804,44 @@ body {
         opacity: 0;
         transform: translateY(5px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes spotlight-pulse {
+    0% {
+        transform: translateY(0);
+    }
+
+    40% {
+        transform: translateY(-2px);
+    }
+
+    100% {
+        transform: translateY(0);
+    }
+}
+
+@keyframes confetti-fall {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, -20px, 0) rotate(0deg) scale(0.86);
+    }
+
+    12% {
+        opacity: 1;
+    }
+
+    78% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate3d(var(--confetti-drift), calc(100vh + 72px), 0) rotate(var(--confetti-rotate)) scale(1);
     }
 }
 
@@ -660,7 +900,32 @@ body {
         justify-content: flex-start;
     }
 
-    #new-task-due-date {
+    #new-task-due-date,
+    #new-task-due-time {
         width: 100%;
+    }
+
+    .toast-region {
+        top: calc(12px + env(safe-area-inset-top, 0));
+        left: 12px;
+        right: 12px;
+        width: auto;
+    }
+
+    .confetti-piece {
+        top: calc(env(safe-area-inset-top, 0) - 28px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .toast,
+    .task.is-spotlight,
+    .confetti-piece {
+        animation: none;
+        transition: none;
+    }
+
+    .confetti-piece {
+        opacity: 0;
     }
 }
