@@ -736,7 +736,7 @@ body {
     font-size: 0.7rem;
 }
 
-@media (min-width: 761px) {
+@media (min-width: 421px) {
     .task-meta .date-field--task {
         width: 185px;
         max-width: 100%;
@@ -744,9 +744,9 @@ body {
     }
 
     .task-meta .time-field--task {
-        width: 150px;
+        width: 152px;
         max-width: 100%;
-        flex: 0 1 150px;
+        flex: 0 1 152px;
     }
 
     .task-meta .task-due-date,
@@ -755,16 +755,18 @@ body {
     }
 }
 
-.apple-device .task-meta .date-field--task,
-.apple-device .task-meta .time-field--task {
-    width: 150px;
-    max-width: 100%;
-    flex: 0 1 150px;
-}
+@media (min-width: 420px) {
+    .apple-device .task-meta .date-field--task,
+    .apple-device .task-meta .time-field--task {
+        width: 150px;
+        max-width: 100%;
+        flex: 0 1 150px;
+    }
 
-.apple-device .task-meta .task-due-date,
-.apple-device .task-meta .task-due-time {
-    width: 100%;
+    .apple-device .task-meta .task-due-date,
+    .apple-device .task-meta .task-due-time {
+        width: 100%;
+    }
 }
 
 /* Completed task visual state */
