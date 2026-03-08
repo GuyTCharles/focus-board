@@ -57,6 +57,7 @@
     const taskInput = document.querySelector("#new-task-input");
     const taskDueDateInput = document.querySelector("#new-task-due-date");
     const taskDueTimeInput = document.querySelector("#new-task-due-time");
+    const taskDueTimeResetButton = document.querySelector("#new-task-due-time-reset");
     const tasksList = document.querySelector("#tasks-list");
     const emptyState = document.querySelector("#empty-state");
     const totalCount = document.querySelector("#count-total");
@@ -318,7 +319,7 @@
             variant: "success",
             title: pickRandom(COMPLETION_TITLES),
             message: pickRandom(COMPLETION_MESSAGES),
-            duration: 4400
+            duration: 5600
         });
     }
 
@@ -332,7 +333,7 @@
             onAction: function () {
                 focusTask(task.id);
             },
-            duration: 6200
+            duration: 7600
         });
     }
 
@@ -587,6 +588,34 @@
         }
 
         return normalizeDueTime(input.dataset.isoTime) || normalizeDueTime(input.value);
+    }
+
+    // Clear the selected time so the task falls back to date-only behavior.
+    function clearTimeInputValue(input) {
+        if (!input) {
+            return;
+        }
+
+        input.dataset.isoTime = "";
+        input.value = "";
+        syncTimeInputPresentation(input);
+    }
+
+    // Keep the clear-time control visible only when a real time is present.
+    function syncTimeResetButton(button, input) {
+        if (!button || !input) {
+            return;
+        }
+
+        const canClear = !input.disabled && Boolean(getTimeInputValue(input));
+        button.hidden = !canClear;
+        button.disabled = !canClear;
+    }
+
+    // Keep the composer time input, min-time rule, and clear button in sync.
+    function syncComposerTimeInputState(preserveCurrentValue = false) {
+        syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput, preserveCurrentValue);
+        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
     }
 
     // Force text-mode rendering on iOS so empty and filled states share a consistent format.
@@ -864,7 +893,7 @@
         }
 
         lastTimedRefreshKey = currentMinuteKey;
-        syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput);
+        syncComposerTimeInputState();
         renderTasks();
     }
 
@@ -874,6 +903,19 @@
         button.type = "button";
         button.className = `btn ${buttonClass}`;
         button.textContent = label;
+        button.addEventListener("click", onClick);
+        return button;
+    }
+
+    // Create the inline clear control used by time inputs.
+    function createTimeResetButton(label, onClick) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "time-reset";
+        button.textContent = "Clear";
+        button.setAttribute("aria-label", label);
+        button.hidden = true;
+        button.disabled = true;
         button.addEventListener("click", onClick);
         return button;
     }
@@ -1173,12 +1215,21 @@
         dueTimeInput.addEventListener("change", function () {
             updateTaskDueTime(index, getTimeInputValue(this));
         });
+        const dueTimeResetButton = createTimeResetButton(`Clear task ${index + 1} due time`, function () {
+            updateTaskDueTime(index, "");
+        });
         syncTimeInputAvailability(dueDateInput, dueTimeInput, true);
         applyTimeInputFallback(dueTimeInput);
+        syncTimeResetButton(dueTimeResetButton, dueTimeInput);
+
+        const dueTimeField = document.createElement("div");
+        dueTimeField.className = "time-field time-field--task";
+        dueTimeField.appendChild(dueTimeInput);
+        dueTimeField.appendChild(dueTimeResetButton);
 
         meta.appendChild(dueBadge);
         meta.appendChild(dueDateInput);
-        meta.appendChild(dueTimeInput);
+        meta.appendChild(dueTimeField);
 
         main.appendChild(descInput);
         main.appendChild(stateText);
@@ -1430,9 +1481,9 @@
             taskInput.value = "";
             taskDueDateInput.value = "";
             taskDueDateInput.dataset.isoDate = "";
-            taskDueTimeInput.value = "";
+            clearTimeInputValue(taskDueTimeInput);
             setSelectedComposerPriority("High");
-            syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput);
+            syncComposerTimeInputState();
             syncDateInputPresentation(taskDueDateInput, IOS_DATE_PLACEHOLDER);
             saveComposerDraft();
             taskInput.focus();
@@ -1469,12 +1520,21 @@
         applyTheme(currentTheme === "dark" ? "light" : "dark");
     });
 
+    if (taskDueTimeResetButton) {
+        taskDueTimeResetButton.addEventListener("click", function () {
+            clearTimeInputValue(taskDueTimeInput);
+            syncComposerTimeInputState(true);
+            saveComposerDraft();
+        });
+    }
+
     // Initial boot sequence.
     applyMinDateConstraint(taskDueDateInput);
     restoreComposerDraft();
     applyDateInputFallback(taskDueDateInput);
-    syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput);
+    syncComposerTimeInputState(true);
     applyTimeInputFallback(taskDueTimeInput);
+    syncComposerTimeInputState(true);
     restoreViewState();
     initializeTheme();
     pruneOverdueNoticeState();
@@ -1497,19 +1557,28 @@
     // Draft listeners are attached after iOS fallback setup so saved dates use normalized values.
     taskInput.addEventListener("input", saveComposerDraft);
     taskDueDateInput.addEventListener("input", function () {
-        syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput);
+        syncComposerTimeInputState();
         saveComposerDraft();
     });
     taskDueDateInput.addEventListener("change", function () {
-        syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput);
+        syncComposerTimeInputState();
         saveComposerDraft();
     });
     taskDueDateInput.addEventListener("blur", function () {
-        syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput);
+        syncComposerTimeInputState();
         saveComposerDraft();
     });
-    taskDueTimeInput.addEventListener("input", saveComposerDraft);
-    taskDueTimeInput.addEventListener("change", saveComposerDraft);
+    taskDueTimeInput.addEventListener("input", function () {
+        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
+        saveComposerDraft();
+    });
+    taskDueTimeInput.addEventListener("change", function () {
+        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
+        saveComposerDraft();
+    });
+    taskDueTimeInput.addEventListener("blur", function () {
+        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
+    });
     composerPriorityInputs.forEach(input => {
         input.addEventListener("change", saveComposerDraft);
     });
