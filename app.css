@@ -756,11 +756,16 @@ body {
 }
 
 @media (min-width: 520px) {
-    .apple-device .task-meta .date-field--task,
-    .apple-device .task-meta .time-field--task {
+    .apple-device .task-meta .date-field--task {
         width: 150px;
         max-width: 100%;
         flex: 0 1 150px;
+    }
+
+    .apple-device .task-meta .time-field--task {
+        width: 145px;
+        max-width: 100%;
+        flex: 0 1 145px;
     }
 
     .apple-device .task-meta .task-due-date,
