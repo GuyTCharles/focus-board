@@ -710,9 +710,9 @@ body {
 
 .apple-device .task-meta .task-due-date,
 .apple-device .task-meta .time-field--task {
-    width: 240px;
+    width: 150px;
     max-width: 100%;
-    flex: 0 1 240px;
+    flex: 0 1 150px;
 }
 
 .apple-device .task-meta .task-due-time {
