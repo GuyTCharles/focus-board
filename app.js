@@ -7,6 +7,7 @@
     const OVERDUE_NOTICE_KEY = "focusboard-overdue-notices";
     const IOS_DATE_PLACEHOLDER = "MM/DD/YYYY";
     const IOS_TIME_PLACEHOLDER = "HH:MM";
+    const DATE_REQUIRED_FOR_TIME_MESSAGE = "Please choose a date before adding a time.";
     const STATUS_FILTERS = ["all", "active", "completed"];
     const PRIORITY_LEVELS = ["High", "Medium", "Low"];
     const SORT_MODES = ["newest", "oldest", "priority-desc", "priority-asc", "due-soon", "due-late"];
@@ -58,6 +59,7 @@
     const taskDueDateInput = document.querySelector("#new-task-due-date");
     const taskDueTimeInput = document.querySelector("#new-task-due-time");
     const taskDueTimeResetButton = document.querySelector("#new-task-due-time-reset");
+    const taskDueTimeField = taskDueTimeInput ? taskDueTimeInput.closest(".time-field") : null;
     const tasksList = document.querySelector("#tasks-list");
     const emptyState = document.querySelector("#empty-state");
     const totalCount = document.querySelector("#count-total");
@@ -612,6 +614,36 @@
         syncTimeInputPresentation(input);
     }
 
+    // Explain why time cannot be entered until a due date exists.
+    function promptForDateBeforeTime() {
+        alert(DATE_REQUIRED_FOR_TIME_MESSAGE);
+    }
+
+    // Keep disabled time wrappers visibly interactive for the date-required prompt.
+    function syncTimeFieldState(field, input) {
+        if (!field || !input) {
+            return;
+        }
+
+        field.classList.toggle("is-disabled", input.disabled);
+    }
+
+    // Route clicks on disabled time wrappers to a date-required prompt.
+    function attachTimeFieldPrompt(field, input) {
+        if (!field || !input || field.dataset.timePromptAttached === "true") {
+            return;
+        }
+
+        field.dataset.timePromptAttached = "true";
+        field.addEventListener("click", function (event) {
+            if (!input.disabled || event.target.closest(".time-reset")) {
+                return;
+            }
+
+            promptForDateBeforeTime();
+        });
+    }
+
     // Keep the clear-time control visible only when a real time is present.
     function syncTimeResetButton(button, input) {
         if (!button || !input) {
@@ -626,6 +658,7 @@
     // Keep the composer time input, min-time rule, and clear button in sync.
     function syncComposerTimeInputState(preserveCurrentValue = false) {
         syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput, preserveCurrentValue);
+        syncTimeFieldState(taskDueTimeField, taskDueTimeInput);
         syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
     }
 
@@ -981,36 +1014,24 @@
     function loadComposerDraft() {
         const storedDraft = getStoredJSON(COMPOSER_DRAFT_KEY) || {};
         const maxDraftLength = Number(taskInput.maxLength) || 180;
-        const normalizedDueDate = normalizeDueDate(storedDraft.dueDate);
-        const normalizedDueTime = normalizeDueTime(storedDraft.dueTime);
 
         return {
             description: typeof storedDraft.description === "string" ? storedDraft.description.slice(0, maxDraftLength) : "",
-            dueDate: isPastDate(normalizedDueDate) ? "" : normalizedDueDate,
-            dueTime: normalizedDueDate && !isPastTimeForDate(normalizedDueDate, normalizedDueTime) ? normalizedDueTime : "",
+            dueDate: "",
+            dueTime: "",
             priority: normalizePriority(storedDraft.priority)
         };
     }
 
     // Persist the current composer state until submit or explicit site-data removal.
+    // Date and time always reset so each new task starts from a fresh schedule state.
     function saveComposerDraft() {
         const draft = {
             description: taskInput.value.slice(0, Number(taskInput.maxLength) || 180),
-            dueDate: getDateInputISOValue(taskDueDateInput),
-            dueTime: "",
             priority: getSelectedComposerPriority()
         };
 
-        if (isPastDate(draft.dueDate)) {
-            draft.dueDate = "";
-        }
-
-        draft.dueTime = draft.dueDate ? getTimeInputValue(taskDueTimeInput) : "";
-        if (isPastTimeForDate(draft.dueDate, draft.dueTime)) {
-            draft.dueTime = "";
-        }
-
-        if (!draft.description && !draft.dueDate && !draft.dueTime && draft.priority === "High") {
+        if (!draft.description && draft.priority === "High") {
             removeStorageItem(COMPOSER_DRAFT_KEY);
             return;
         }
@@ -1237,6 +1258,8 @@
         dueTimeField.className = "time-field time-field--task";
         dueTimeField.appendChild(dueTimeInput);
         dueTimeField.appendChild(dueTimeResetButton);
+        attachTimeFieldPrompt(dueTimeField, dueTimeInput);
+        syncTimeFieldState(dueTimeField, dueTimeInput);
 
         meta.appendChild(dueBadge);
         meta.appendChild(dueDateInput);
@@ -1424,14 +1447,18 @@
 
     // Save edited due time value.
     function updateTaskDueTime(index, dueTime) {
+        const normalizedDueTime = normalizeDueTime(dueTime);
+
         if (!tasks[index].dueDate) {
+            if (normalizedDueTime) {
+                promptForDateBeforeTime();
+            }
             tasks[index].dueTime = "";
             saveTasks();
             renderTasks();
             return;
         }
 
-        const normalizedDueTime = normalizeDueTime(dueTime);
         if (isPastTimeForDate(tasks[index].dueDate, normalizedDueTime)) {
             alert("Past times are not allowed for today. Please choose the current time or a future time.");
             renderTasks();
@@ -1538,6 +1565,7 @@
             saveComposerDraft();
         });
     }
+    attachTimeFieldPrompt(taskDueTimeField, taskDueTimeInput);
 
     // Initial boot sequence.
     applyMinDateConstraint(taskDueDateInput);
