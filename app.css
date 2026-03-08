@@ -736,41 +736,37 @@ body {
     font-size: 0.7rem;
 }
 
-@media (min-width: 521px) {
+.task-meta .date-field--task,
+.task-meta .time-field--task {
+    max-width: 100%;
+}
+
+.task-meta .task-due-date,
+.task-meta .task-due-time {
+    width: 100%;
+}
+
+@media (min-width: 761px) {
     .task-meta .date-field--task {
         width: 185px;
-        max-width: 100%;
         flex: 0 1 185px;
     }
 
     .task-meta .time-field--task {
         width: 152px;
-        max-width: 100%;
         flex: 0 1 152px;
-    }
-
-    .task-meta .task-due-date,
-    .task-meta .task-due-time {
-        width: 100%;
     }
 }
 
 @media (min-width: 520px) {
     .apple-device .task-meta .date-field--task {
         width: 150px;
-        max-width: 100%;
         flex: 0 1 150px;
     }
 
     .apple-device .task-meta .time-field--task {
         width: 145px;
-        max-width: 100%;
         flex: 0 1 145px;
-    }
-
-    .apple-device .task-meta .task-due-date,
-    .apple-device .task-meta .task-due-time {
-        width: 100%;
     }
 }
 
