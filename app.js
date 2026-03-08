@@ -17,12 +17,12 @@
     const COMPLETION_MESSAGES = [
         "You wrapped this one up cleanly.",
         "Another win on the board.",
-        "That task is officially done."
+        "This task is officially done."
     ];
     const OVERDUE_TITLES = [
-        "Still recoverable",
-        "Take the next step",
-        "Momentum can restart"
+        "You can still recover it.",
+        "Get back in motion.",
+        "Take control and regain momentum."
     ];
     const OVERDUE_MESSAGES = [
         "This task slipped past its due time. Pick one small move and get it moving again.",
