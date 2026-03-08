@@ -767,8 +767,8 @@ body {
     }
 
     .apple-device .task-meta .time-field--task {
-        width: 142px;
-        flex: 0 1 142px;
+        width: 140px;
+        flex: 0 1 140px;
     }
 }
 
@@ -780,8 +780,8 @@ body {
     }
 
     .apple-device .time-field--task {
-        width: 145px;
-        flex: 0 1 145px;
+        width: 140px;
+        flex: 0 1 140px;
     }
 }
 
