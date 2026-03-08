@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="app.css?v=6">
+    <link rel="stylesheet" href="app.css?v=7">
 </head>
 
 <body>
@@ -59,7 +59,10 @@
                 >
                 <div class="composer-schedule">
                     <label class="sr-only" for="new-task-due-date">Due date</label>
-                    <input type="date" id="new-task-due-date">
+                    <div class="date-field date-field--composer">
+                        <input type="date" id="new-task-due-date">
+                        <button type="button" id="new-task-due-date-reset" class="time-reset" aria-label="Clear due date" hidden>Clear</button>
+                    </div>
                     <label class="sr-only" for="new-task-due-time">Due time (optional)</label>
                     <div class="time-field time-field--composer">
                         <input type="time" id="new-task-due-time" aria-label="Due time (optional)">
@@ -141,6 +144,6 @@
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
     <div id="celebration-layer" class="celebration-layer" aria-hidden="true"></div>
     <!-- App behavior -->
-    <script src="app.js?v=6"></script>
+    <script src="app.js?v=7"></script>
 </body>
 </html>
