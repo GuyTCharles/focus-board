@@ -193,6 +193,14 @@
             return;
         }
 
+        Array.from(toastRegion.children).forEach(existingToast => {
+            if (typeof existingToast.dismissToast === "function") {
+                existingToast.dismissToast(true);
+            } else {
+                existingToast.remove();
+            }
+        });
+
         const toast = document.createElement("article");
         toast.className = `toast toast--${options.variant || "info"} is-entering`;
         toast.setAttribute("role", "status");
@@ -233,22 +241,25 @@
         toast.appendChild(actions);
         toastRegion.prepend(toast);
 
-        while (toastRegion.childElementCount > 3) {
-            toastRegion.lastElementChild.remove();
-        }
-
         requestAnimationFrame(function () {
             toast.classList.remove("is-entering");
         });
 
         const dismissTimer = window.setTimeout(dismissToast, options.duration || 5200);
+        toast.dismissToast = dismissToast;
 
-        function dismissToast() {
+        function dismissToast(immediate = false) {
             if (!toast.isConnected) {
                 return;
             }
 
             window.clearTimeout(dismissTimer);
+
+            if (immediate) {
+                toast.remove();
+                return;
+            }
+
             toast.classList.add("is-leaving");
             window.setTimeout(function () {
                 if (toast.isConnected) {
