@@ -328,7 +328,7 @@
         showToast({
             variant: "warning",
             title: pickRandom(OVERDUE_TITLES),
-            message: `${pickRandom(OVERDUE_MESSAGES)} ${task.description}`,
+            message: pickRandom(OVERDUE_MESSAGES),
             actionLabel: "Focus task",
             onAction: function () {
                 focusTask(task.id);
