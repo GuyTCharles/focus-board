@@ -159,43 +159,6 @@ body {
     font-size: 1.03rem;
 }
 
-.hero-tools {
-    margin-top: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-
-.notification-toggle {
-    border: var(--stroke-thin) solid var(--line);
-    white-space: nowrap;
-}
-
-.notification-toggle[data-state="granted"] {
-    border-color: rgba(0, 163, 145, 0.3);
-    background: linear-gradient(140deg, rgba(0, 160, 143, 0.14), rgba(0, 127, 115, 0.08));
-    color: #045950;
-}
-
-[data-theme="dark"] .notification-toggle[data-state="granted"] {
-    color: var(--accent);
-}
-
-.notification-toggle[data-state="denied"],
-.notification-toggle[data-state="unavailable"] {
-    border-color: rgba(184, 47, 47, 0.22);
-    color: var(--danger);
-}
-
-.notification-status {
-    margin: 0;
-    flex: 1 1 280px;
-    color: var(--ink-muted);
-    font-size: 0.9rem;
-}
-
 /* Shared panel container style (composer + task panel) */
 .panel {
     background: var(--surface);
@@ -965,6 +928,73 @@ body {
     color: var(--ink-strong);
 }
 
+body.modal-open {
+    overflow: hidden;
+}
+
+.app-modal[hidden] {
+    display: none;
+}
+
+.app-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+}
+
+.app-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(14, 20, 29, 0.52);
+    backdrop-filter: blur(7px);
+}
+
+.app-modal-dialog {
+    position: relative;
+    width: min(460px, 100%);
+    border: var(--stroke-thin) solid var(--panel-border);
+    border-radius: 24px;
+    padding: 24px;
+    background: color-mix(in srgb, var(--surface-strong) 92%, #f7fbff 8%);
+    box-shadow: 0 28px 70px rgba(19, 31, 46, 0.28);
+    display: grid;
+    gap: 14px;
+}
+
+.app-modal-kicker {
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--hero-kicker);
+}
+
+.app-modal-dialog h2 {
+    margin: 0;
+    font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+    font-size: clamp(1.35rem, 3.8vw, 1.9rem);
+    line-height: 1.08;
+}
+
+.app-modal-dialog p {
+    margin: 0;
+    color: var(--ink-muted);
+    font-size: 0.98rem;
+    line-height: 1.55;
+}
+
+.app-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
 .celebration-layer {
     position: fixed;
     inset: 0;
@@ -1117,10 +1147,6 @@ body {
         padding-right: calc(var(--theme-toggle-size) + 32px);
     }
 
-    .hero-tools {
-        padding-right: calc(var(--theme-toggle-size) + 32px);
-    }
-
     .task-priority {
         width: fit-content;
     }
@@ -1139,6 +1165,23 @@ body {
         left: 12px;
         right: 12px;
         width: auto;
+    }
+
+    .app-modal {
+        padding: 12px;
+    }
+
+    .app-modal-dialog {
+        padding: 20px;
+        border-radius: 20px;
+    }
+
+    .app-modal-actions {
+        justify-content: stretch;
+    }
+
+    .app-modal-actions .btn {
+        width: 100%;
     }
 
     .confetti-piece {
