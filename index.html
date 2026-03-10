@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="app.css">
+    <link rel="stylesheet" href="app.css?v=3">
 </head>
 
 <body>
@@ -45,6 +45,12 @@
                 </div>
             </div>
             <p class="hero-subtitle">Plan with clarity, execute faster, and keep momentum.</p>
+            <div class="hero-tools">
+                <button id="notification-toggle" class="btn btn-secondary notification-toggle" type="button">Enable alerts</button>
+                <p id="notification-status" class="notification-status" aria-live="polite">
+                    Browser alerts can warn you when tasks are due soon or overdue while this app stays open.
+                </p>
+            </div>
         </header>
 
         <!-- Composer: create a task with optional due date, optional time, and priority -->
@@ -144,6 +150,6 @@
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
     <div id="celebration-layer" class="celebration-layer" aria-hidden="true"></div>
     <!-- App behavior -->
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>
