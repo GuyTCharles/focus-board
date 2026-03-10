@@ -1,1730 +1,1160 @@
-(function () {
-    // Persistent keys and static configuration.
-    const STORAGE_KEY = "tasks";
-    const THEME_KEY = "focusboard-theme";
-    const VIEW_STATE_KEY = "focusboard-view-state";
-    const COMPOSER_DRAFT_KEY = "focusboard-composer-draft";
-    const OVERDUE_NOTICE_KEY = "focusboard-overdue-notices";
-    const IOS_DATE_PLACEHOLDER = "MM/DD/YYYY";
-    const IOS_TIME_PLACEHOLDER = "HH:MM";
-    const DATE_REQUIRED_FOR_TIME_MESSAGE = "Please choose a date before adding a time.";
-    const STATUS_FILTERS = ["all", "active", "completed"];
-    const PRIORITY_LEVELS = ["High", "Medium", "Low"];
-    const SORT_MODES = ["newest", "oldest", "priority-desc", "priority-asc", "due-soon", "due-late"];
-    const COMPLETION_TITLES = [
-        "Task complete",
-        "Nice work",
-        "Momentum kept"
-    ];
-    const COMPLETION_MESSAGES = [
-        "You wrapped this one up cleanly.",
-        "Another win on the board.",
-        "This task is officially done."
-    ];
-    const OVERDUE_TITLES = [
-        "You can still recover it.",
-        "Get back in motion.",
-        "Take control and regain momentum."
-    ];
-    const OVERDUE_MESSAGES = [
-        "This task slipped past its due time. Pick one small move and get it moving again.",
-        "The deadline passed, but the task is still recoverable. Start with the easiest next action.",
-        "You are not behind forever. A small restart is enough to get this task back in motion."
-    ];
-    const PRIORITY_RANK = {
-        High: 3,
-        Medium: 2,
-        Low: 1
-    };
-
-    // Task model stored in memory and serialized to localStorage.
-    function Task(description, priority, dueDate, dueTime, createdAt, id) {
-        this.id = id || generateTaskId();
-        this.description = description;
-        this.completed = false;
-        this.priority = normalizePriority(priority);
-        this.dueDate = normalizeDueDate(dueDate);
-        this.dueTime = this.dueDate ? normalizeDueTime(dueTime) : "";
-        this.createdAt = Number(createdAt) || Date.now();
-    }
-
-    // Toggle task completion state.
-    Task.prototype.toggleComplete = function () {
-        this.completed = !this.completed;
-    };
-
-    // DOM references.
-    const taskForm = document.querySelector("#new-task-form");
-    const taskInput = document.querySelector("#new-task-input");
-    const taskDueDateInput = document.querySelector("#new-task-due-date");
-    const taskDueDateResetButton = document.querySelector("#new-task-due-date-reset");
-    const taskDueTimeInput = document.querySelector("#new-task-due-time");
-    const taskDueTimeResetButton = document.querySelector("#new-task-due-time-reset");
-    const taskDueTimeField = taskDueTimeInput ? taskDueTimeInput.closest(".time-field") : null;
-    const tasksList = document.querySelector("#tasks-list");
-    const emptyState = document.querySelector("#empty-state");
-    const totalCount = document.querySelector("#count-total");
-    const activeCount = document.querySelector("#count-active");
-    const doneCount = document.querySelector("#count-done");
-    const filterButtons = Array.from(document.querySelectorAll(".btn-filter"));
-    const priorityFilterSelect = document.querySelector("#priority-filter");
-    const sortModeSelect = document.querySelector("#sort-mode");
-    const themeToggle = document.querySelector("#theme-toggle");
-    const composerPriorityInputs = Array.from(document.querySelectorAll("input[name='priority']"));
-    const toastRegion = document.querySelector("#toast-region");
-    const celebrationLayer = document.querySelector("#celebration-layer");
-
-    // UI state for filtering and sorting.
-    let activeFilter = "all";
-    let activePriorityFilter = "all";
-    let sortMode = "newest";
-    const useIOSDateFallback = shouldUseIOSDateFallback();
-    document.documentElement.classList.toggle("apple-device", useIOSDateFallback);
-    let overdueNoticeState = loadOverdueNoticeState();
-    let lastTimedRefreshKey = getCurrentLocalMinuteKey();
-    let taskMetaLayoutFrame = 0;
-
-    // In-memory state loaded once at startup.
-    const tasks = loadTasks();
-
-    // Normalize priority values from UI/storage.
-    function normalizePriority(priority) {
-        return PRIORITY_LEVELS.includes(priority) ? priority : "High";
-    }
-
-    // Keep status filter values inside the supported set.
-    function normalizeActiveFilter(filter) {
-        return STATUS_FILTERS.includes(filter) ? filter : "all";
-    }
-
-    // Keep toolbar priority filter values inside the supported set.
-    function normalizePriorityFilter(priorityFilter) {
-        return priorityFilter === "all" || PRIORITY_LEVELS.includes(priorityFilter) ? priorityFilter : "all";
-    }
-
-    // Keep sort mode values inside the supported set.
-    function normalizeSortMode(mode) {
-        return SORT_MODES.includes(mode) ? mode : "newest";
-    }
-
-    // Trim and collapse repeated whitespace.
-    function normalizeDescription(value) {
-        return value.replace(/\s+/g, " ").trim();
-    }
-
-    // Generate stable IDs so tasks can be highlighted and notified exactly once.
-    function generateTaskId() {
-        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-            return crypto.randomUUID();
-        }
-
-        return `task-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-    }
-
-    // Small helper for rotating celebratory and encouraging copy.
-    function pickRandom(list) {
-        if (!Array.isArray(list) || list.length === 0) {
-            return "";
-        }
-
-        return list[Math.floor(Math.random() * list.length)];
-    }
-
-    // Safe storage access keeps the app usable when storage is unavailable.
-    function getStorageItem(key) {
-        try {
-            return localStorage.getItem(key);
-        } catch (error) {
-            return null;
-        }
-    }
-
-    // Safe storage writes avoid blocking the UI on storage quota/privacy errors.
-    function setStorageItem(key, value) {
-        try {
-            localStorage.setItem(key, value);
-        } catch (error) {}
-    }
-
-    // Safe storage removals let the app clear stale state without hard failures.
-    function removeStorageItem(key) {
-        try {
-            localStorage.removeItem(key);
-        } catch (error) {}
-    }
-
-    // Read JSON blobs from localStorage and ignore malformed payloads.
-    function getStoredJSON(key) {
-        const storedValue = getStorageItem(key);
-        if (!storedValue) {
-            return null;
-        }
-
-        try {
-            return JSON.parse(storedValue);
-        } catch (error) {
-            return null;
-        }
-    }
-
-    // Restore the set of overdue notices already shown for the current due moments.
-    function loadOverdueNoticeState() {
-        const storedState = getStoredJSON(OVERDUE_NOTICE_KEY);
-        return storedState && typeof storedState === "object" ? storedState : {};
-    }
-
-    // Persist overdue-notice tracking so the same task is not re-announced every render.
-    function saveOverdueNoticeState() {
-        setStorageItem(OVERDUE_NOTICE_KEY, JSON.stringify(overdueNoticeState));
-    }
-
-    // Drop tasks that no longer exist from the stored overdue notice map.
-    function pruneOverdueNoticeState() {
-        const validIds = new Set(tasks.map(task => task.id));
-        const nextState = {};
-        Object.entries(overdueNoticeState).forEach(([taskId, dueMoment]) => {
-            if (validIds.has(taskId)) {
-                nextState[taskId] = dueMoment;
-            }
-        });
-        overdueNoticeState = nextState;
-        saveOverdueNoticeState();
-    }
-
-    // Build a lightweight toast with optional action and timed dismissal.
-    function showToast(options) {
-        if (!toastRegion) {
-            return;
-        }
-
-        Array.from(toastRegion.children).forEach(existingToast => {
-            if (typeof existingToast.dismissToast === "function") {
-                existingToast.dismissToast(true);
-            } else {
-                existingToast.remove();
-            }
-        });
-
-        const toast = document.createElement("article");
-        toast.className = `toast toast--${options.variant || "info"} is-entering`;
-        toast.setAttribute("role", "status");
-
-        const title = document.createElement("h3");
-        title.className = "toast-title";
-        title.textContent = options.title || "";
-
-        const message = document.createElement("p");
-        message.className = "toast-message";
-        message.textContent = options.message || "";
-
-        const actions = document.createElement("div");
-        actions.className = "toast-actions";
-
-        if (typeof options.onAction === "function" && options.actionLabel) {
-            const actionButton = document.createElement("button");
-            actionButton.type = "button";
-            actionButton.className = "btn btn-secondary toast-action";
-            actionButton.textContent = options.actionLabel;
-            actionButton.addEventListener("click", function () {
-                options.onAction();
-                dismissToast();
-            });
-            actions.appendChild(actionButton);
-        }
-
-        const dismissButton = document.createElement("button");
-        dismissButton.type = "button";
-        dismissButton.className = "toast-dismiss";
-        dismissButton.setAttribute("aria-label", "Dismiss notification");
-        dismissButton.textContent = "Dismiss";
-        dismissButton.addEventListener("click", dismissToast);
-        actions.appendChild(dismissButton);
-
-        toast.appendChild(title);
-        toast.appendChild(message);
-        toast.appendChild(actions);
-        toastRegion.prepend(toast);
-
-        requestAnimationFrame(function () {
-            toast.classList.remove("is-entering");
-        });
-
-        const dismissTimer = window.setTimeout(dismissToast, options.duration || 5200);
-        toast.dismissToast = dismissToast;
-
-        function dismissToast(immediate = false) {
-            if (!toast.isConnected) {
-                return;
-            }
-
-            window.clearTimeout(dismissTimer);
-
-            if (immediate) {
-                toast.remove();
-                return;
-            }
-
-            toast.classList.add("is-leaving");
-            window.setTimeout(function () {
-                if (toast.isConnected) {
-                    toast.remove();
-                }
-            }, 220);
-        }
-    }
-
-    // Create a denser confetti burst for task completions.
-    function launchConfetti() {
-        if (!celebrationLayer) {
-            return;
-        }
-
-        const colors = ["#00a391", "#ffd58c", "#9ed8ff", "#ff7d5f", "#1c2430"];
-
-        for (let index = 0; index < 56; index += 1) {
-            const piece = document.createElement("span");
-            piece.className = "confetti-piece";
-            piece.style.left = `${2 + Math.random() * 96}%`;
-            piece.style.setProperty("--confetti-drift", `${-150 + Math.random() * 300}px`);
-            piece.style.setProperty("--confetti-rotate", `${300 + Math.random() * 520}deg`);
-            piece.style.setProperty("--confetti-duration", `${2200 + Math.random() * 1400}ms`);
-            piece.style.setProperty("--confetti-delay", `${Math.random() * 300}ms`);
-            piece.style.setProperty("--confetti-color", colors[index % colors.length]);
-            celebrationLayer.appendChild(piece);
-
-            window.setTimeout(function () {
-                if (piece.isConnected) {
-                    piece.remove();
-                }
-            }, 4500);
-        }
-    }
-
-    // Bring a task back into focus for recovery prompts.
-    function focusTask(taskId) {
-        activeFilter = "active";
-        activePriorityFilter = "all";
-        sortMode = "due-soon";
-        priorityFilterSelect.value = activePriorityFilter;
-        sortModeSelect.value = sortMode;
-        updateFilterButtons();
-        saveViewState();
-        renderTasks();
-
-        const taskItem = tasksList.querySelector(`[data-task-id="${taskId}"]`);
-        if (!taskItem) {
-            return;
-        }
-
-        taskItem.classList.add("is-spotlight");
-        taskItem.scrollIntoView({
-            behavior: "smooth",
-            block: "center"
-        });
-
-        window.setTimeout(function () {
-            taskItem.classList.remove("is-spotlight");
-        }, 1800);
-    }
-
-    // Congratulate the user and celebrate when a task is completed.
-    function celebrateTaskCompletion(task) {
-        launchConfetti();
-        showToast({
-            variant: "success",
-            title: pickRandom(COMPLETION_TITLES),
-            message: pickRandom(COMPLETION_MESSAGES),
-            duration: 5600
-        });
-    }
-
-    // Encourage recovery when a task slips overdue.
-    function encourageOverdueTask(task) {
-        showToast({
-            variant: "warning",
-            title: pickRandom(OVERDUE_TITLES),
-            message: pickRandom(OVERDUE_MESSAGES),
-            actionLabel: "Focus task",
-            onAction: function () {
-                focusTask(task.id);
-            },
-            duration: 7600
-        });
-    }
-
-    // Keep only ISO date values (YYYY-MM-DD).
-    function normalizeDueDate(value) {
-        if (typeof value !== "string") {
-            return "";
-        }
-
-        const trimmedValue = value.trim();
-        if (!trimmedValue) {
-            return "";
-        }
-
-        let year;
-        let month;
-        let day;
-
-        const isoMatch = trimmedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (isoMatch) {
-            year = isoMatch[1];
-            month = isoMatch[2];
-            day = isoMatch[3];
-        } else {
-            const slashMatch = trimmedValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-            if (!slashMatch) {
-                return "";
-            }
-
-            year = slashMatch[3];
-            month = slashMatch[1].padStart(2, "0");
-            day = slashMatch[2].padStart(2, "0");
-        }
-
-        const yearNumber = Number(year);
-        const monthNumber = Number(month);
-        const dayNumber = Number(day);
-        const parsedDate = new Date(yearNumber, monthNumber - 1, dayNumber);
-
-        if (
-            Number.isNaN(parsedDate.getTime()) ||
-            parsedDate.getFullYear() !== yearNumber ||
-            parsedDate.getMonth() !== monthNumber - 1 ||
-            parsedDate.getDate() !== dayNumber
-        ) {
-            return "";
-        }
-
-        return `${year}-${month}-${day}`;
-    }
-
-    // Keep only HH:MM values in 24-hour time.
-    function normalizeDueTime(value) {
-        if (typeof value !== "string") {
-            return "";
-        }
-
-        const trimmedValue = value.trim();
-        if (!trimmedValue) {
-            return "";
-        }
-
-        const timeMatch = trimmedValue.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
-        if (!timeMatch) {
-            return "";
-        }
-
-        const hour = Number(timeMatch[1]);
-        const minute = Number(timeMatch[2]);
-
-        if (hour > 23 || minute > 59) {
-            return "";
-        }
-
-        return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-    }
-
-    // Basic input safety and non-empty validation.
-    function isValidDescription(value) {
-        return value.length > 0 && !/[<>]/.test(value);
-    }
-
-    // Convert Date object to local ISO date (YYYY-MM-DD).
-    function toLocalISODate(date) {
-        if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-            return "";
-        }
-
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const day = String(date.getDate()).padStart(2, "0");
-        return `${year}-${month}-${day}`;
-    }
-
-    // Convert Date object to local HH:MM.
-    function toLocalISOTime(date) {
-        if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-            return "";
-        }
-
-        const hours = String(date.getHours()).padStart(2, "0");
-        const minutes = String(date.getMinutes()).padStart(2, "0");
-        return `${hours}:${minutes}`;
-    }
-
-    // Read a reliable ISO date from an <input type="date"> across browser variations.
-    function getISOFromDateInputElement(input) {
-        if (!input) {
-            return "";
-        }
-
-        const normalizedFromValue = normalizeDueDate(input.value);
-        if (normalizedFromValue) {
-            return normalizedFromValue;
-        }
-
-        return toLocalISODate(input.valueAsDate);
-    }
-
-    // Apply a dynamic minimum date so past dates cannot be selected.
-    function applyMinDateConstraint(input) {
-        if (!input) {
-            return;
-        }
-
-        input.min = getTodayISO();
-    }
-
-    // Enable the time field only when a due date exists.
-    function syncTimeInputAvailability(dateInput, timeInput, preserveCurrentValue = false) {
-        if (!timeInput) {
-            return;
-        }
-
-        const normalizedDate = getDateInputISOValue(dateInput);
-        timeInput.disabled = !normalizedDate;
-        timeInput.dataset.minimumTime = getMinimumTimeForDate(normalizedDate);
-        timeInput.min = timeInput.dataset.minimumTime;
-
-        if (!normalizedDate) {
-            timeInput.dataset.isoTime = "";
-            timeInput.value = "";
-        } else if (!preserveCurrentValue && isPastTimeForDate(normalizedDate, getTimeInputValue(timeInput))) {
-            timeInput.dataset.isoTime = "";
-            timeInput.value = "";
-        }
-
-        syncTimeInputPresentation(timeInput);
-    }
-
-    // Convert ISO date to MM/DD/YYYY for consistent display across devices.
-    function formatIsoDate(isoDate) {
-        const normalizedDate = normalizeDueDate(isoDate);
-        if (!normalizedDate) {
-            return "";
-        }
-
-        const [year, month, day] = normalizedDate.split("-");
-        return `${month}/${day}/${year}`;
-    }
-
-    // Convert HH:MM to a compact 12-hour time label.
-    function formatDueTime(dueTime) {
-        const normalizedTime = normalizeDueTime(dueTime);
-        if (!normalizedTime) {
-            return "";
-        }
-
-        const [hoursText, minutes] = normalizedTime.split(":");
-        const hours = Number(hoursText);
-        const meridiem = hours >= 12 ? "PM" : "AM";
-        const twelveHour = hours % 12 || 12;
-        return `${twelveHour}:${minutes} ${meridiem}`;
-    }
-
-    // Treat date-only tasks as due at the end of the selected day.
-    function getDueMomentKey(dueDate, dueTime) {
-        const normalizedDate = normalizeDueDate(dueDate);
-        if (!normalizedDate) {
-            return "";
-        }
-
-        return `${normalizedDate}T${normalizeDueTime(dueTime) || "23:59"}`;
-    }
-
-    // Current local YYYY-MM-DDTHH:MM value for overdue checks.
-    function getCurrentLocalMinuteKey() {
-        const now = new Date();
-        return `${toLocalISODate(now)}T${toLocalISOTime(now)}`;
-    }
-
-    // Only today's tasks need a moving minimum time.
-    function getMinimumTimeForDate(isoDate) {
-        return normalizeDueDate(isoDate) === getTodayISO() ? toLocalISOTime(new Date()) : "";
-    }
-
-    // Past times are invalid only when the selected due date is today.
-    function isPastTimeForDate(isoDate, dueTime) {
-        const normalizedDate = normalizeDueDate(isoDate);
-        const normalizedTime = normalizeDueTime(dueTime);
-
-        if (!normalizedDate || !normalizedTime || normalizedDate !== getTodayISO()) {
-            return false;
-        }
-
-        return `${normalizedDate}T${normalizedTime}` < getCurrentLocalMinuteKey();
-    }
-
-    // Read the currently selected composer priority radio.
-    function getSelectedComposerPriority() {
-        const selectedInput = composerPriorityInputs.find(input => input.checked);
-        return normalizePriority(selectedInput ? selectedInput.value : "High");
-    }
-
-    // Restore the composer priority radio selection from storage.
-    function setSelectedComposerPriority(priority) {
-        const normalizedPriority = normalizePriority(priority);
-        composerPriorityInputs.forEach(input => {
-            input.checked = input.value === normalizedPriority;
-        });
-    }
-
-    // Detect iOS/macOS touch Safari where empty date inputs can appear blank.
-    function shouldUseIOSDateFallback() {
-        const ua = navigator.userAgent || "";
-        const isIOSDevice = /iPad|iPhone|iPod/.test(ua);
-        const isTouchMac = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-        return isIOSDevice || isTouchMac;
-    }
-
-    // Read normalized ISO value from a date input in both native and iOS-fallback modes.
-    function getDateInputISOValue(input) {
-        if (!input) {
-            return "";
-        }
-
-        if (!useIOSDateFallback) {
-            return getISOFromDateInputElement(input);
-        }
-
-        return normalizeDueDate(input.dataset.isoDate) || getISOFromDateInputElement(input);
-    }
-
-    // Read normalized time values in both native and iOS-fallback modes.
-    function getTimeInputValue(input) {
-        if (!input) {
-            return "";
-        }
-
-        if (!useIOSDateFallback) {
-            return normalizeDueTime(input.value);
-        }
-
-        return normalizeDueTime(input.dataset.isoTime) || normalizeDueTime(input.value);
-    }
-
-    // Clear the selected time so the task falls back to date-only behavior.
-    function clearTimeInputValue(input) {
-        if (!input) {
-            return;
-        }
-
-        input.dataset.isoTime = "";
-        input.value = "";
-        syncTimeInputPresentation(input);
-    }
-
-    // Clear the selected date so the task falls back to an unscheduled state.
-    function clearDateInputValue(input) {
-        if (!input) {
-            return;
-        }
-
-        input.dataset.isoDate = "";
-        input.value = "";
-
-        if (useIOSDateFallback) {
-            syncDateInputPresentation(input, IOS_DATE_PLACEHOLDER);
-        }
-    }
-
-    // Explain why time cannot be entered until a due date exists.
-    function promptForDateBeforeTime() {
-        alert(DATE_REQUIRED_FOR_TIME_MESSAGE);
-    }
-
-    // Keep disabled time wrappers visibly interactive for the date-required prompt.
-    function syncTimeFieldState(field, input) {
-        if (!field || !input) {
-            return;
-        }
-
-        field.classList.toggle("is-disabled", input.disabled);
-    }
-
-    // Route clicks on disabled time wrappers to a date-required prompt.
-    function attachTimeFieldPrompt(field, input) {
-        if (!field || !input || field.dataset.timePromptAttached === "true") {
-            return;
-        }
-
-        field.dataset.timePromptAttached = "true";
-        field.addEventListener("click", function (event) {
-            if (!input.disabled || event.target.closest(".time-reset")) {
-                return;
-            }
-
-            promptForDateBeforeTime();
-        });
-    }
-
-    // Keep the clear-time control visible only when a real time is present.
-    function syncTimeResetButton(button, input) {
-        if (!button || !input) {
-            return;
-        }
-
-        const canClear = !input.disabled && Boolean(getTimeInputValue(input));
-        button.hidden = !canClear;
-        button.disabled = !canClear;
-    }
-
-    // Keep the clear-date control visible only when a real date is present.
-    function syncDateResetButton(button, input) {
-        if (!button || !input) {
-            return;
-        }
-
-        const canClear = Boolean(getDateInputISOValue(input));
-        button.hidden = !canClear;
-        button.disabled = !canClear;
-    }
-
-    // Keep the composer time input, min-time rule, and clear button in sync.
-    function syncComposerTimeInputState(preserveCurrentValue = false) {
-        syncDateResetButton(taskDueDateResetButton, taskDueDateInput);
-        syncTimeInputAvailability(taskDueDateInput, taskDueTimeInput, preserveCurrentValue);
-        syncTimeFieldState(taskDueTimeField, taskDueTimeInput);
-        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
-    }
-
-    // Force text-mode rendering on iOS so empty and filled states share a consistent format.
-    function syncDateInputPresentation(input, placeholderText) {
-        if (!useIOSDateFallback || !input) {
-            return;
-        }
-
-        const isoDate = getDateInputISOValue(input);
-        input.dataset.isoDate = isoDate;
-        input.type = "text";
-        input.value = isoDate ? formatIsoDate(isoDate) : placeholderText;
-        input.placeholder = "";
-        input.classList.toggle("date-empty-fallback", !isoDate);
-        input.setAttribute("inputmode", "none");
-    }
-
-    // Force text-mode rendering on iOS so empty time fields still show a visible cue.
-    function syncTimeInputPresentation(input, placeholderText = IOS_TIME_PLACEHOLDER) {
-        if (!useIOSDateFallback || !input) {
-            return;
-        }
-
-        const normalizedTime = getTimeInputValue(input);
-        input.dataset.isoTime = normalizedTime;
-        input.type = "text";
-        input.value = normalizedTime ? formatDueTime(normalizedTime) : placeholderText;
-        input.placeholder = "";
-        input.classList.toggle("time-empty-fallback", !normalizedTime);
-        input.setAttribute("inputmode", "none");
-    }
-
-    // Switch to native date mode momentarily to open platform picker.
-    function openNativeDatePicker(input) {
-        if (!useIOSDateFallback || !input) {
-            return;
-        }
-
-        const isoDate = getDateInputISOValue(input);
-        input.type = "date";
-        applyMinDateConstraint(input);
-        input.value = isoDate;
-        input.placeholder = "";
-        input.classList.remove("date-empty-fallback");
-        input.removeAttribute("inputmode");
-
-        if (typeof input.showPicker === "function") {
-            input.showPicker();
-        }
-    }
-
-    // Switch to native time mode momentarily to open the platform picker.
-    function openNativeTimePicker(input) {
-        if (!useIOSDateFallback || !input || input.disabled) {
-            return;
-        }
-
-        const normalizedTime = getTimeInputValue(input);
-        input.type = "time";
-        input.min = normalizeDueTime(input.dataset.minimumTime);
-        input.value = normalizedTime;
-        input.placeholder = "";
-        input.classList.remove("time-empty-fallback");
-        input.removeAttribute("inputmode");
-
-        if (typeof input.showPicker === "function") {
-            input.showPicker();
-        }
-    }
-
-    // Attach iOS fallback behavior for a date input once.
-    function applyDateInputFallback(input, placeholderText = IOS_DATE_PLACEHOLDER) {
-        if (!useIOSDateFallback || !input) {
-            return;
-        }
-
-        if (input.dataset.iosDateFallbackAttached === "true") {
-            syncDateInputPresentation(input, placeholderText);
-            return;
-        }
-
-        input.dataset.iosDateFallbackAttached = "true";
-        input.dataset.isoDate = normalizeDueDate(input.value);
-        applyMinDateConstraint(input);
-        syncDateInputPresentation(input, placeholderText);
-
-        input.addEventListener("focus", function () {
-            openNativeDatePicker(input);
-        });
-
-        input.addEventListener("blur", function () {
-            if (input.type === "date") {
-                const normalizedDate = getISOFromDateInputElement(input);
-                if (normalizedDate) {
-                    input.dataset.isoDate = normalizedDate;
-                }
-            }
-            syncDateInputPresentation(input, placeholderText);
-        });
-
-        input.addEventListener("change", function () {
-            // Change is a committed picker action, so allow updates and explicit clears.
-            const previousIsoDate = normalizeDueDate(input.dataset.isoDate);
-
-            if (input.value === "") {
-                input.dataset.isoDate = "";
-            } else {
-                const normalizedDate = getISOFromDateInputElement(input);
-                if (isPastDate(normalizedDate)) {
-                    alert("Past dates are not allowed. Please choose today or a future date.");
-                    input.dataset.isoDate = !isPastDate(previousIsoDate) ? previousIsoDate : "";
-                } else if (normalizedDate) {
-                    input.dataset.isoDate = normalizedDate;
-                }
-            }
-            syncDateInputPresentation(input, placeholderText);
-        });
-
-        // Some iOS versions update the field on "input" before "change".
-        input.addEventListener("input", function () {
-            const normalizedDate = getISOFromDateInputElement(input);
-            if (!normalizedDate || isPastDate(normalizedDate)) {
-                return;
-            }
-
-            input.dataset.isoDate = normalizedDate;
-            syncDateInputPresentation(input, placeholderText);
-        });
-
-        input.addEventListener("click", function () {
-            if (input.type !== "date") {
-                openNativeDatePicker(input);
-            }
-        });
-    }
-
-    // Attach iOS fallback behavior for a time input once.
-    function applyTimeInputFallback(input, placeholderText = IOS_TIME_PLACEHOLDER) {
-        if (!useIOSDateFallback || !input) {
-            return;
-        }
-
-        if (input.dataset.iosTimeFallbackAttached === "true") {
-            syncTimeInputPresentation(input, placeholderText);
-            return;
-        }
-
-        input.dataset.iosTimeFallbackAttached = "true";
-        input.dataset.isoTime = getTimeInputValue(input);
-        input.dataset.minimumTime = normalizeDueTime(input.min);
-        syncTimeInputPresentation(input, placeholderText);
-
-        input.addEventListener("focus", function () {
-            openNativeTimePicker(input);
-        });
-
-        input.addEventListener("blur", function () {
-            if (input.type === "time") {
-                const normalizedTime = normalizeDueTime(input.value);
-                if (normalizedTime) {
-                    input.dataset.isoTime = normalizedTime;
-                }
-            }
-            syncTimeInputPresentation(input, placeholderText);
-        });
-
-        input.addEventListener("change", function () {
-            const previousIsoTime = normalizeDueTime(input.dataset.isoTime);
-            const minimumTime = normalizeDueTime(input.dataset.minimumTime);
-
-            if (input.value === "") {
-                input.dataset.isoTime = "";
-            } else {
-                const normalizedTime = normalizeDueTime(input.value);
-                if (minimumTime && normalizedTime && normalizedTime < minimumTime) {
-                    alert("Past times are not allowed for today. Please choose the current time or a future time.");
-                    input.dataset.isoTime = previousIsoTime && previousIsoTime >= minimumTime ? previousIsoTime : "";
-                } else if (normalizedTime) {
-                    input.dataset.isoTime = normalizedTime;
-                }
-            }
-            syncTimeInputPresentation(input, placeholderText);
-        });
-
-        input.addEventListener("input", function () {
-            const normalizedTime = normalizeDueTime(input.value);
-            const minimumTime = normalizeDueTime(input.dataset.minimumTime);
-
-            if (!normalizedTime || (minimumTime && normalizedTime < minimumTime)) {
-                return;
-            }
-
-            input.dataset.isoTime = normalizedTime;
-        });
-
-        input.addEventListener("click", function () {
-            if (input.type !== "time" && !input.disabled) {
-                openNativeTimePicker(input);
-            }
-        });
-    }
-
-    // Build local YYYY-MM-DD for overdue checks.
-    function getTodayISO() {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const year = today.getFullYear();
-        const month = String(today.getMonth() + 1).padStart(2, "0");
-        const day = String(today.getDate()).padStart(2, "0");
-        return `${year}-${month}-${day}`;
-    }
-
-    // Whether a date is earlier than the current local day.
-    function isPastDate(isoDate) {
-        return Boolean(isoDate) && isoDate < getTodayISO();
-    }
-
-    // User-facing date label for due badges (fixed MM/DD/YYYY format).
-    function formatDate(dueDate, dueTime) {
-        if (!dueDate) {
-            return "No due date";
-        }
-
-        const normalizedDate = normalizeDueDate(dueDate);
-        if (!normalizedDate) {
-            return "No due date";
-        }
-
-        const normalizedTime = normalizeDueTime(dueTime);
-        if (!normalizedTime) {
-            return formatIsoDate(normalizedDate);
-        }
-
-        return `${formatIsoDate(normalizedDate)} at ${formatDueTime(normalizedTime)}`;
-    }
-
-    // A task is overdue only when incomplete and its due moment has already passed.
-    function isOverdue(task) {
-        return !task.completed && Boolean(task.dueDate) && getDueMomentKey(task.dueDate, task.dueTime) < getCurrentLocalMinuteKey();
-    }
-
-    // Detect newly overdue tasks and show encouragement once per due moment.
-    function processOverdueTransitions() {
-        const currentMinuteKey = getCurrentLocalMinuteKey();
-        const nextState = {};
-
-        tasks.forEach(task => {
-            const dueMoment = getDueMomentKey(task.dueDate, task.dueTime);
-            if (!task.completed && dueMoment && dueMoment < currentMinuteKey) {
-                if (overdueNoticeState[task.id] !== dueMoment) {
-                    encourageOverdueTask(task);
-                }
-                nextState[task.id] = dueMoment;
-            }
-        });
-
-        overdueNoticeState = nextState;
-        saveOverdueNoticeState();
-    }
-
-    // Refresh overdue UI when the local minute changes, without interrupting active editing.
-    function refreshTimedState(force) {
-        const currentMinuteKey = getCurrentLocalMinuteKey();
-        if (!force && currentMinuteKey === lastTimedRefreshKey) {
-            return;
-        }
-
-        const activeElement = document.activeElement;
-        const isEditingField =
-            activeElement &&
-            (activeElement.tagName === "INPUT" || activeElement.tagName === "SELECT" || activeElement.tagName === "TEXTAREA");
-
-        if (!force && isEditingField) {
-            return;
-        }
-
-        lastTimedRefreshKey = currentMinuteKey;
-        syncComposerTimeInputState();
-        renderTasks();
-    }
-
-    // Shared helper for action buttons in task cards.
-    function createButton(label, buttonClass, onClick) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = `btn ${buttonClass}`;
-        button.textContent = label;
-        button.addEventListener("click", onClick);
-        return button;
-    }
-
-    // Create the inline clear control used by time inputs.
-    function createTimeResetButton(label, onClick) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "time-reset";
-        button.textContent = "Clear";
-        button.setAttribute("aria-label", label);
-        button.hidden = true;
-        button.disabled = true;
-        button.addEventListener("click", onClick);
-        return button;
-    }
-
-    // Rehydrate tasks from localStorage safely.
-    function loadTasks() {
-        const parsedTasks = getStoredJSON(STORAGE_KEY);
-        const storedTasks = Array.isArray(parsedTasks) ? parsedTasks : [];
-
-        return storedTasks
-            .filter(task => task && typeof task.description === "string")
-            .map((task, index) => {
-                const loadedTask = new Task(
-                    normalizeDescription(task.description),
-                    task.priority,
-                    task.dueDate,
-                    task.dueTime,
-                    task.createdAt || Date.now() - index,
-                    task.id
-                );
-                loadedTask.completed = Boolean(task.completed);
-                return loadedTask;
-            })
-            .filter(task => isValidDescription(task.description));
-    }
-
-    // Persist current in-memory tasks.
-    function saveTasks() {
-        setStorageItem(STORAGE_KEY, JSON.stringify(tasks));
-    }
-
-    // Restore toolbar filters/sort from localStorage.
-    function loadViewState() {
-        const storedState = getStoredJSON(VIEW_STATE_KEY) || {};
-        return {
-            activeFilter: normalizeActiveFilter(storedState.activeFilter),
-            activePriorityFilter: normalizePriorityFilter(storedState.activePriorityFilter),
-            sortMode: normalizeSortMode(storedState.sortMode)
-        };
-    }
-
-    // Persist toolbar filters/sort so the task view comes back as the user left it.
-    function saveViewState() {
-        setStorageItem(VIEW_STATE_KEY, JSON.stringify({
-            activeFilter,
-            activePriorityFilter,
-            sortMode
-        }));
-    }
-
-    // Restore any in-progress task draft from localStorage.
-    function loadComposerDraft() {
-        const storedDraft = getStoredJSON(COMPOSER_DRAFT_KEY) || {};
-        const maxDraftLength = Number(taskInput.maxLength) || 180;
-
-        return {
-            description: typeof storedDraft.description === "string" ? storedDraft.description.slice(0, maxDraftLength) : "",
-            dueDate: "",
-            dueTime: "",
-            priority: normalizePriority(storedDraft.priority)
-        };
-    }
-
-    // Persist the current composer state until submit or explicit site-data removal.
-    // Date and time always reset so each new task starts from a fresh schedule state.
-    function saveComposerDraft() {
-        const draft = {
-            description: taskInput.value.slice(0, Number(taskInput.maxLength) || 180),
-            priority: getSelectedComposerPriority()
-        };
-
-        if (!draft.description && draft.priority === "High") {
-            removeStorageItem(COMPOSER_DRAFT_KEY);
-            return;
-        }
-
-        setStorageItem(COMPOSER_DRAFT_KEY, JSON.stringify(draft));
-    }
-
-    // Apply stored toolbar state back onto the controls.
-    function restoreViewState() {
-        const storedState = loadViewState();
-        activeFilter = storedState.activeFilter;
-        activePriorityFilter = storedState.activePriorityFilter;
-        sortMode = storedState.sortMode;
-        priorityFilterSelect.value = activePriorityFilter;
-        sortModeSelect.value = sortMode;
-        updateFilterButtons();
-    }
-
-    // Apply the saved composer draft back onto the form controls.
-    function restoreComposerDraft() {
-        const storedDraft = loadComposerDraft();
-        taskInput.value = storedDraft.description;
-        taskDueDateInput.value = storedDraft.dueDate;
-        taskDueDateInput.dataset.isoDate = storedDraft.dueDate;
-        taskDueTimeInput.value = storedDraft.dueTime;
-        setSelectedComposerPriority(storedDraft.priority);
-    }
-
-    // Refresh task counters (total/active/done).
-    function updateSummary() {
-        const done = tasks.filter(task => task.completed).length;
-        const total = tasks.length;
-        const active = total - done;
-
-        totalCount.textContent = total;
-        activeCount.textContent = active;
-        doneCount.textContent = done;
-    }
-
-    // Status filter predicate.
-    function matchesActiveFilter(task) {
-        if (activeFilter === "active") {
-            return !task.completed;
-        }
-
-        if (activeFilter === "completed") {
-            return task.completed;
-        }
-
-        return true;
-    }
-
-    // Priority filter predicate.
-    function matchesPriorityFilter(task) {
-        return activePriorityFilter === "all" || task.priority === activePriorityFilter;
-    }
-
-    // Compare due moments while keeping "no due date" entries last.
-    function compareDueDates(taskA, taskB, latestFirst) {
-        const missingDateA = !taskA.dueDate;
-        const missingDateB = !taskB.dueDate;
-
-        if (missingDateA && missingDateB) {
-            return 0;
-        }
-
-        if (missingDateA) {
-            return 1;
-        }
-
-        if (missingDateB) {
-            return -1;
-        }
-
-        const dueMomentA = getDueMomentKey(taskA.dueDate, taskA.dueTime);
-        const dueMomentB = getDueMomentKey(taskB.dueDate, taskB.dueTime);
-
-        if (latestFirst) {
-            return dueMomentB.localeCompare(dueMomentA);
-        }
-
-        return dueMomentA.localeCompare(dueMomentB);
-    }
-
-    // Comparator selected by current sort mode.
-    function compareTasks(taskA, taskB) {
-        if (sortMode === "oldest") {
-            return taskA.createdAt - taskB.createdAt;
-        }
-
-        if (sortMode === "priority-desc") {
-            return (PRIORITY_RANK[taskB.priority] - PRIORITY_RANK[taskA.priority]) || (taskB.createdAt - taskA.createdAt);
-        }
-
-        if (sortMode === "priority-asc") {
-            return (PRIORITY_RANK[taskA.priority] - PRIORITY_RANK[taskB.priority]) || (taskB.createdAt - taskA.createdAt);
-        }
-
-        if (sortMode === "due-soon") {
-            return compareDueDates(taskA, taskB, false) || (taskB.createdAt - taskA.createdAt);
-        }
-
-        if (sortMode === "due-late") {
-            return compareDueDates(taskA, taskB, true) || (taskB.createdAt - taskA.createdAt);
-        }
-
-        return taskB.createdAt - taskA.createdAt;
-    }
-
-    // Build filtered/sorted task/index pairs for rendering.
-    function getVisibleTaskEntries() {
-        return tasks
-            .map((task, index) => ({
-                task,
-                index
-            }))
-            .filter(entry => matchesActiveFilter(entry.task) && matchesPriorityFilter(entry.task))
-            .sort((entryA, entryB) => compareTasks(entryA.task, entryB.task));
-    }
-
-    // Keep filter button "active" style in sync with state.
-    function updateFilterButtons() {
-        filterButtons.forEach(button => {
-            button.classList.toggle("is-active", button.dataset.filter === activeFilter);
-        });
-    }
-
-    // Build priority selector for each task row.
-    function createPrioritySelect(index, currentPriority) {
-        const select = document.createElement("select");
-        select.className = "task-priority";
-        select.setAttribute("aria-label", "Task priority");
-
-        PRIORITY_LEVELS.forEach(priority => {
-            const option = document.createElement("option");
-            option.value = priority;
-            option.textContent = priority;
-            option.selected = priority === currentPriority;
-            select.appendChild(option);
-        });
-
-        select.addEventListener("change", function () {
-            updateTaskPriority(index, this.value);
-        });
-
-        return select;
-    }
-
-    // Stack task schedule controls below an overdue badge only when the row cannot fit them side-by-side.
-    function syncTaskMetaScheduleLayout() {
-        if (!tasksList) {
-            return;
-        }
-
-        if (taskMetaLayoutFrame && typeof window.cancelAnimationFrame === "function") {
-            window.cancelAnimationFrame(taskMetaLayoutFrame);
-        }
-
-        const runLayoutCheck = function () {
-            taskMetaLayoutFrame = 0;
-            const metaRows = Array.from(tasksList.querySelectorAll(".task-meta"));
-
-            metaRows.forEach(meta => {
-                const overdueBadge = meta.querySelector(".due-badge.overdue");
-                const dateField = meta.querySelector(".date-field--task");
-                const timeField = meta.querySelector(".time-field--task");
-
-                if (!overdueBadge || !dateField || !timeField) {
-                    meta.classList.remove("task-meta--stack-schedule");
-                    return;
-                }
-
-                const metaStyles = window.getComputedStyle(meta);
-                const gap = parseFloat(metaStyles.columnGap || metaStyles.gap || "0") || 0;
-                const availableWidth = meta.clientWidth;
-
-                if (!availableWidth) {
-                    meta.classList.remove("task-meta--stack-schedule");
-                    return;
-                }
-
-                const requiredWidth =
-                    overdueBadge.getBoundingClientRect().width +
-                    dateField.getBoundingClientRect().width +
-                    timeField.getBoundingClientRect().width +
-                    (gap * 2) +
-                    1;
-
-                meta.classList.toggle("task-meta--stack-schedule", requiredWidth > availableWidth);
-            });
-        };
-
-        if (typeof window.requestAnimationFrame === "function") {
-            taskMetaLayoutFrame = window.requestAnimationFrame(runLayoutCheck);
-            return;
-        }
-
-        runLayoutCheck();
-    }
-
-    // Create one task row and wire all row-level interactions.
-    function createTaskItem(task, index) {
-        const item = document.createElement("li");
-        item.className = `task priority-${task.priority.toLowerCase()}`;
-        item.dataset.taskId = task.id;
-        if (task.completed) {
-            item.classList.add("done");
-        }
-
-        const main = document.createElement("div");
-        main.className = "task-main";
-
-        const descInput = document.createElement("input");
-        descInput.type = "text";
-        descInput.className = "task-desc";
-        descInput.value = task.description;
-        descInput.maxLength = 180;
-        descInput.setAttribute("aria-label", `Task ${index + 1} description`);
-        descInput.addEventListener("blur", function () {
-            updateTaskDescription(index, this.value);
-        });
-        descInput.addEventListener("keydown", function (event) {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                this.blur();
-            }
-        });
-
-        const stateText = document.createElement("p");
-        stateText.className = "task-state";
-        stateText.textContent = task.completed ? "Status: Completed" : "Status: In progress";
-
-        const meta = document.createElement("div");
-        meta.className = "task-meta";
-
-        const dueBadge = document.createElement("p");
-        dueBadge.className = "due-badge";
-
-        if (task.dueDate) {
-            dueBadge.textContent = `${isOverdue(task) ? "Overdue" : "Due"}: ${formatDate(task.dueDate, task.dueTime)}`;
-        } else {
-            dueBadge.textContent = "No due date";
-        }
-
-        if (isOverdue(task)) {
-            dueBadge.classList.add("overdue");
-        }
-
-        const dueDateInput = document.createElement("input");
-        dueDateInput.type = "date";
-        dueDateInput.className = "task-due-date";
-        dueDateInput.value = task.dueDate;
-        applyMinDateConstraint(dueDateInput);
-        dueDateInput.setAttribute("aria-label", `Task ${index + 1} due date`);
-        dueDateInput.addEventListener("change", function () {
-            updateTaskDueDate(index, getDateInputISOValue(this));
-        });
-        applyDateInputFallback(dueDateInput);
-        const dueDateResetButton = createTimeResetButton(`Clear task ${index + 1} due date`, function () {
-            updateTaskDueDate(index, "");
-        });
-        syncDateResetButton(dueDateResetButton, dueDateInput);
-
-        const dueTimeInput = document.createElement("input");
-        dueTimeInput.type = "time";
-        dueTimeInput.className = "task-due-time";
-        dueTimeInput.value = task.dueTime;
-        dueTimeInput.setAttribute("aria-label", `Task ${index + 1} due time (optional)`);
-        dueTimeInput.addEventListener("change", function () {
-            updateTaskDueTime(index, getTimeInputValue(this));
-        });
-        const dueTimeResetButton = createTimeResetButton(`Clear task ${index + 1} due time`, function () {
-            updateTaskDueTime(index, "");
-        });
-        syncTimeInputAvailability(dueDateInput, dueTimeInput, true);
-        applyTimeInputFallback(dueTimeInput);
-        syncTimeResetButton(dueTimeResetButton, dueTimeInput);
-
-        const dueDateField = document.createElement("div");
-        dueDateField.className = "date-field date-field--task";
-        dueDateField.appendChild(dueDateInput);
-        dueDateField.appendChild(dueDateResetButton);
-
-        const dueTimeField = document.createElement("div");
-        dueTimeField.className = "time-field time-field--task";
-        dueTimeField.appendChild(dueTimeInput);
-        dueTimeField.appendChild(dueTimeResetButton);
-        attachTimeFieldPrompt(dueTimeField, dueTimeInput);
-        syncTimeFieldState(dueTimeField, dueTimeInput);
-
-        const scheduleFields = document.createElement("div");
-        scheduleFields.className = "task-schedule-fields";
-        scheduleFields.appendChild(dueDateField);
-        scheduleFields.appendChild(dueTimeField);
-
-        meta.appendChild(dueBadge);
-        meta.appendChild(scheduleFields);
-
-        main.appendChild(descInput);
-        main.appendChild(stateText);
-        main.appendChild(meta);
-
-        const actions = document.createElement("div");
-        actions.className = "task-actions";
-
-        const toggleButton = createButton(
-            task.completed ? "Undo" : "Complete",
-            "btn-secondary",
-            function () {
-                toggleTaskComplete(index);
-            }
-        );
-
-        const deleteButton = createButton("Delete", "btn-danger", function () {
-            removeTask(index);
-        });
-
-        actions.appendChild(toggleButton);
-        actions.appendChild(deleteButton);
-
-        item.appendChild(main);
-        item.appendChild(createPrioritySelect(index, task.priority));
-        item.appendChild(actions);
-
-        return item;
-    }
-
-    // Render visible tasks and empty states.
-    function renderTasks() {
-        tasksList.innerHTML = "";
-        const visibleEntries = getVisibleTaskEntries();
-
-        visibleEntries.forEach(({
-            task,
-            index
-        }) => {
-            tasksList.appendChild(createTaskItem(task, index));
-        });
-
-        if (tasks.length === 0) {
-            emptyState.textContent = "No tasks yet. Add your first task above.";
-        } else if (visibleEntries.length === 0) {
-            emptyState.textContent = "No tasks match the current filters.";
-        }
-
-        emptyState.hidden = visibleEntries.length > 0;
-
-        updateSummary();
-        processOverdueTransitions();
-        syncTaskMetaScheduleLayout();
-    }
-
-    // Add a task from form values and reconcile active filters if needed.
-    function addTask(description, priority, dueDate, dueTime) {
-        const normalizedDescription = normalizeDescription(description);
-        const normalizedDueDate = normalizeDueDate(dueDate);
-        const normalizedDueTime = normalizedDueDate ? normalizeDueTime(dueTime) : "";
-
-        if (!normalizedDescription) {
-            alert("Please add a task.");
-            return false;
-        }
-
-        if (/[<>]/.test(normalizedDescription)) {
-            alert("Please enter a valid task description without HTML characters.");
-            return false;
-        }
-
-        if (isPastDate(normalizedDueDate)) {
-            alert("Please choose today or a future date.");
-            syncDateInputPresentation(taskDueDateInput, IOS_DATE_PLACEHOLDER);
-            return false;
-        }
-
-        if (isPastTimeForDate(normalizedDueDate, normalizedDueTime)) {
-            alert("Please choose the current time or a future time.");
-            return false;
-        }
-
-        const newTask = new Task(normalizedDescription, priority, normalizedDueDate, normalizedDueTime, Date.now());
-        tasks.unshift(newTask);
-
-        let shouldUpdateFilterUI = false;
-
-        if (!matchesActiveFilter(newTask)) {
-            activeFilter = "all";
-            shouldUpdateFilterUI = true;
-        }
-
-        if (!matchesPriorityFilter(newTask)) {
-            activePriorityFilter = "all";
-            priorityFilterSelect.value = "all";
-        }
-
-        if (shouldUpdateFilterUI) {
-            updateFilterButtons();
-        }
-
-        saveTasks();
-        saveViewState();
-        renderTasks();
-        scrollToFirstTask();
-        return true;
-    }
-
-    // Remove task at index.
-    function removeTask(index) {
-        tasks.splice(index, 1);
-        saveTasks();
-        renderTasks();
-    }
-
-    // Toggle completion for task at index.
-    function toggleTaskComplete(index) {
-        const task = tasks[index];
-        const wasCompleted = task.completed;
-        task.toggleComplete();
-
-        if (task.completed) {
-            delete overdueNoticeState[task.id];
-            saveOverdueNoticeState();
-        }
-
-        saveTasks();
-        renderTasks();
-
-        if (!wasCompleted && task.completed) {
-            celebrateTaskCompletion(task);
-        }
-    }
-
-    // Save edited task text after validation.
-    function updateTaskDescription(index, description) {
-        const normalizedDescription = normalizeDescription(description);
-        if (!normalizedDescription) {
-            alert("Task description cannot be empty.");
-            renderTasks();
-            return;
-        }
-
-        if (/[<>]/.test(normalizedDescription)) {
-            alert("Invalid input. HTML tags are not allowed.");
-            renderTasks();
-            return;
-        }
-
-        tasks[index].description = normalizedDescription;
-        saveTasks();
-        renderTasks();
-    }
-
-    // Save edited priority value.
-    function updateTaskPriority(index, priority) {
-        tasks[index].priority = normalizePriority(priority);
-        saveTasks();
-        renderTasks();
-    }
-
-    // Save edited due date value.
-    function updateTaskDueDate(index, dueDate) {
-        const normalizedDueDate = normalizeDueDate(dueDate);
-
-        if (isPastDate(normalizedDueDate)) {
-            alert("Past dates are not allowed. Please choose today or a future date.");
-            renderTasks();
-            return;
-        }
-
-        tasks[index].dueDate = normalizedDueDate;
-        if (!normalizedDueDate) {
-            tasks[index].dueTime = "";
-        } else if (isPastTimeForDate(normalizedDueDate, tasks[index].dueTime)) {
-            tasks[index].dueTime = "";
-            alert("Past times are not allowed for today. Please choose the current time or a future time.");
-        }
-        saveTasks();
-        renderTasks();
-    }
-
-    // Save edited due time value.
-    function updateTaskDueTime(index, dueTime) {
-        const normalizedDueTime = normalizeDueTime(dueTime);
-
-        if (!tasks[index].dueDate) {
-            if (normalizedDueTime) {
-                promptForDateBeforeTime();
-            }
-            tasks[index].dueTime = "";
-            saveTasks();
-            renderTasks();
-            return;
-        }
-
-        if (isPastTimeForDate(tasks[index].dueDate, normalizedDueTime)) {
-            alert("Past times are not allowed for today. Please choose the current time or a future time.");
-            renderTasks();
-            return;
-        }
-
-        tasks[index].dueTime = normalizedDueTime;
-        saveTasks();
-        renderTasks();
-    }
-
-    // Bring newly added item into view.
-    function scrollToFirstTask() {
-        const firstTask = tasksList.firstElementChild;
-        if (firstTask) {
-            firstTask.scrollIntoView({
-                behavior: "smooth",
-                block: "nearest"
-            });
-        }
-    }
-
-    // Apply selected theme and persist preference.
-    function applyTheme(theme) {
-        const resolvedTheme = theme === "dark" ? "dark" : "light";
-        const nextThemeLabel = resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode";
-        document.documentElement.setAttribute("data-theme", resolvedTheme);
-        themeToggle.setAttribute("aria-pressed", resolvedTheme === "dark" ? "true" : "false");
-        themeToggle.setAttribute("aria-label", nextThemeLabel);
-        themeToggle.setAttribute("title", nextThemeLabel);
-        setStorageItem(THEME_KEY, resolvedTheme);
-    }
-
-    // Initialize theme from localStorage, then system preference fallback.
-    function initializeTheme() {
-        const storedTheme = getStorageItem(THEME_KEY);
-        if (storedTheme === "dark" || storedTheme === "light") {
-            applyTheme(storedTheme);
-            return;
-        }
-
-        const prefersDark =
-            typeof window.matchMedia === "function" &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-        applyTheme(prefersDark ? "dark" : "light");
-    }
-
-    // Form submission: add task and reset composer inputs.
-    taskForm.addEventListener("submit", function (event) {
-        event.preventDefault();
-        const selectedPriority = document.querySelector("input[name='priority']:checked").value;
-        const description = taskInput.value;
-        const dueDate = getDateInputISOValue(taskDueDateInput);
-        const dueTime = taskDueTimeInput.disabled ? "" : getTimeInputValue(taskDueTimeInput);
-
-        if (addTask(description, selectedPriority, dueDate, dueTime)) {
-            taskInput.value = "";
-            clearDateInputValue(taskDueDateInput);
-            clearTimeInputValue(taskDueTimeInput);
-            setSelectedComposerPriority("High");
-            syncComposerTimeInputState();
-            saveComposerDraft();
-            taskInput.focus();
-        }
-    });
-
-    // Status filter buttons.
-    filterButtons.forEach(button => {
-        button.addEventListener("click", function () {
-            activeFilter = this.dataset.filter;
-            updateFilterButtons();
-            saveViewState();
-            renderTasks();
-        });
-    });
-
-    // Priority filter dropdown.
-    priorityFilterSelect.addEventListener("change", function () {
-        activePriorityFilter = this.value;
-        saveViewState();
-        renderTasks();
-    });
-
-    // Sort mode dropdown.
-    sortModeSelect.addEventListener("change", function () {
-        sortMode = this.value;
-        saveViewState();
-        renderTasks();
-    });
-
-    // Theme toggle button.
-    themeToggle.addEventListener("click", function () {
-        const currentTheme = document.documentElement.getAttribute("data-theme");
-        applyTheme(currentTheme === "dark" ? "light" : "dark");
-    });
-
-    if (taskDueTimeResetButton) {
-        taskDueTimeResetButton.addEventListener("click", function () {
-            clearTimeInputValue(taskDueTimeInput);
-            syncComposerTimeInputState(true);
-            saveComposerDraft();
-        });
-    }
-    if (taskDueDateResetButton) {
-        taskDueDateResetButton.addEventListener("click", function () {
-            clearDateInputValue(taskDueDateInput);
-            syncComposerTimeInputState();
-            saveComposerDraft();
-        });
-    }
-    attachTimeFieldPrompt(taskDueTimeField, taskDueTimeInput);
-
-    // Initial boot sequence.
-    applyMinDateConstraint(taskDueDateInput);
-    restoreComposerDraft();
-    applyDateInputFallback(taskDueDateInput);
-    syncComposerTimeInputState(true);
-    applyTimeInputFallback(taskDueTimeInput);
-    syncComposerTimeInputState(true);
-    restoreViewState();
-    initializeTheme();
-    pruneOverdueNoticeState();
-    renderTasks();
-
-    window.setInterval(function () {
-        refreshTimedState(false);
-    }, 30000);
-
-    window.addEventListener("focus", function () {
-        refreshTimedState(true);
-    });
-
-    window.addEventListener("resize", function () {
-        syncTaskMetaScheduleLayout();
-    });
-
-    document.addEventListener("visibilitychange", function () {
-        if (!document.hidden) {
-            refreshTimedState(true);
-        }
-    });
-
-    // Draft listeners are attached after iOS fallback setup so saved dates use normalized values.
-    taskInput.addEventListener("input", saveComposerDraft);
-    taskDueDateInput.addEventListener("input", function () {
-        syncComposerTimeInputState();
-        saveComposerDraft();
-    });
-    taskDueDateInput.addEventListener("change", function () {
-        syncComposerTimeInputState();
-        saveComposerDraft();
-    });
-    taskDueDateInput.addEventListener("blur", function () {
-        syncComposerTimeInputState();
-        saveComposerDraft();
-    });
-    taskDueTimeInput.addEventListener("input", function () {
-        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
-        saveComposerDraft();
-    });
-    taskDueTimeInput.addEventListener("change", function () {
-        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
-        saveComposerDraft();
-    });
-    taskDueTimeInput.addEventListener("blur", function () {
-        syncTimeResetButton(taskDueTimeResetButton, taskDueTimeInput);
-    });
-    composerPriorityInputs.forEach(input => {
-        input.addEventListener("change", saveComposerDraft);
-    });
-
-    saveComposerDraft();
-    saveViewState();
-})();
+/* Design tokens for light mode */
+:root {
+    --bg-main: #faf8f5;
+    --bg-main-alt: #eff8ff;
+    --bg-gradient-a: #ffd58c;
+    --bg-gradient-b: #9ed8ff;
+    --bg-glow-a: rgba(255, 213, 140, 0.48);
+    --bg-glow-b: rgba(158, 216, 255, 0.42);
+    --ink-strong: #1c2430;
+    --ink-muted: #4e5a6b;
+    --surface: rgba(255, 255, 255, 0.8);
+    --surface-strong: #ffffff;
+    --line: #d8e0ea;
+    --panel-border: rgba(162, 181, 203, 0.44);
+    --stroke-thin: 0.85px;
+    --task-accent-size: 4px;
+    --accent: #007f73;
+    --accent-dark: #016259;
+    --danger: #b82f2f;
+    --hero-surface: rgba(255, 255, 255, 0.68);
+    --hero-surface-solid: #f5f7fa;
+    --hero-border: rgba(255, 255, 255, 0.85);
+    --hero-kicker: #0a7c70;
+    --shadow-soft: 0 20px 45px rgba(19, 31, 46, 0.14);
+    --toast-surface: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.88));
+    --toast-success-surface: linear-gradient(160deg, rgba(231, 250, 246, 0.96), rgba(247, 252, 255, 0.92));
+    --toast-warning-surface: linear-gradient(160deg, rgba(255, 249, 237, 0.96), rgba(248, 251, 255, 0.92));
+    --toast-success-border: rgba(0, 163, 145, 0.28);
+    --toast-warning-border: rgba(221, 155, 47, 0.3);
+    --toast-shadow: 0 18px 36px rgba(19, 31, 46, 0.18);
+    --radius-lg: 22px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
+    --theme-toggle-size: 42px;
+}
+
+/* Theme token overrides for dark mode */
+[data-theme="dark"] {
+    --bg-main: #121a24;
+    --bg-main-alt: #0f2232;
+    --bg-gradient-a: #2f4e73;
+    --bg-gradient-b: #274753;
+    --bg-glow-a: rgba(63, 101, 151, 0.36);
+    --bg-glow-b: rgba(50, 112, 133, 0.3);
+    --ink-strong: #ebf3ff;
+    --ink-muted: #abc0d8;
+    --surface: rgba(18, 27, 38, 0.82);
+    --surface-strong: #192534;
+    --line: #2f435c;
+    --panel-border: rgba(124, 146, 174, 0.36);
+    --accent: #48d3bf;
+    --accent-dark: #24a892;
+    --danger: #ff7676;
+    --hero-surface: rgba(23, 36, 51, 0.9);
+    --hero-surface-solid: #1a2a3c;
+    --hero-border: #3a4d66;
+    --hero-kicker: #66e0cf;
+    --shadow-soft: 0 20px 45px rgba(3, 8, 18, 0.5);
+    --toast-surface: linear-gradient(160deg, rgba(22, 34, 49, 0.98), rgba(18, 28, 40, 0.94));
+    --toast-success-surface: linear-gradient(160deg, rgba(18, 58, 58, 0.96), rgba(20, 34, 49, 0.95));
+    --toast-warning-surface: linear-gradient(160deg, rgba(62, 48, 22, 0.95), rgba(22, 34, 49, 0.96));
+    --toast-success-border: rgba(72, 211, 191, 0.38);
+    --toast-warning-border: rgba(255, 204, 115, 0.34);
+    --toast-shadow: 0 18px 36px rgba(3, 8, 18, 0.48);
+}
+
+/* Global reset */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    min-height: 100%;
+}
+
+/* Page background and base typography */
+body {
+    font-family: "DM Sans", "Avenir Next", "Segoe UI", sans-serif;
+    color: var(--ink-strong);
+    background-color: var(--bg-main);
+    background-image:
+        radial-gradient(720px 520px at -12% -14%, var(--bg-glow-a), transparent 66%),
+        radial-gradient(760px 540px at 112% 118%, var(--bg-glow-b), transparent 67%),
+        linear-gradient(150deg, var(--bg-main) 8%, var(--bg-main-alt) 92%);
+    background-repeat: no-repeat;
+    padding: 32px 18px;
+    position: relative;
+}
+
+/* Max-width wrapper for the full app layout */
+.app-shell {
+    width: min(920px, 100%);
+    margin: 0 auto;
+    display: grid;
+    gap: 18px;
+}
+
+/* Hero card (title, subtitle, theme switch) */
+.hero {
+    background-color: var(--hero-surface);
+    border: var(--stroke-thin) solid var(--hero-border);
+    -webkit-backdrop-filter: saturate(125%) blur(8px);
+    backdrop-filter: saturate(125%) blur(8px);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+    padding: 30px 28px;
+    animation: rise-in 450ms ease both;
+}
+
+/* Header composition helpers */
+.hero-head {
+    display: flex;
+    align-items: flex-start;
+}
+
+.hero-copy {
+    width: 100%;
+}
+
+.hero-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+/* Small uppercase label above the title */
+.hero-kicker {
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--hero-kicker);
+}
+
+/* Fallback when blur support is unavailable */
+@supports not ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {
+    .hero {
+        background-color: var(--hero-surface-solid);
+    }
+}
+
+.hero h1 {
+    margin: 8px 0 0;
+    font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+    font-size: clamp(2rem, 5.5vw, 2.8rem);
+    line-height: 1.05;
+}
+
+.hero-subtitle {
+    margin: 10px 0 0;
+    color: var(--ink-muted);
+    max-width: 54ch;
+    font-size: 1.03rem;
+}
+
+.hero-tools {
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.notification-toggle {
+    border: var(--stroke-thin) solid var(--line);
+    white-space: nowrap;
+}
+
+.notification-toggle[data-state="granted"] {
+    border-color: rgba(0, 163, 145, 0.3);
+    background: linear-gradient(140deg, rgba(0, 160, 143, 0.14), rgba(0, 127, 115, 0.08));
+    color: #045950;
+}
+
+[data-theme="dark"] .notification-toggle[data-state="granted"] {
+    color: var(--accent);
+}
+
+.notification-toggle[data-state="denied"],
+.notification-toggle[data-state="unavailable"] {
+    border-color: rgba(184, 47, 47, 0.22);
+    color: var(--danger);
+}
+
+.notification-status {
+    margin: 0;
+    flex: 1 1 280px;
+    color: var(--ink-muted);
+    font-size: 0.9rem;
+}
+
+/* Shared panel container style (composer + task panel) */
+.panel {
+    background: var(--surface);
+    border: var(--stroke-thin) solid var(--panel-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(8px);
+    padding: 22px;
+    animation: rise-in 500ms ease both;
+}
+
+/* Task creation form layout */
+#new-task-form {
+    display: grid;
+    gap: 14px;
+}
+
+/* Main task text and schedule controls */
+#new-task-input,
+#new-task-due-date,
+#new-task-due-time {
+    width: 100%;
+    border: var(--stroke-thin) solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    font-size: 1rem;
+    font-family: inherit;
+    color: var(--ink-strong);
+    background: var(--surface-strong);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* Shared focus ring for composer inputs */
+#new-task-input:focus-visible,
+#new-task-due-date:focus-visible,
+#new-task-due-time:focus-visible {
+    outline: none;
+    border-color: #00a391;
+    box-shadow: 0 0 0 4px rgba(0, 163, 145, 0.16);
+}
+
+.composer-schedule {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    align-items: stretch;
+}
+
+.date-field,
+.time-field {
+    position: relative;
+    min-width: 0;
+}
+
+.date-field > input,
+.time-field > input {
+    width: 100%;
+}
+
+.time-reset {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    border: var(--stroke-thin) solid var(--line);
+    border-radius: 999px;
+    padding: 0 10px;
+    height: 28px;
+    background: color-mix(in srgb, var(--surface-strong) 88%, #eef4fb 12%);
+    color: var(--ink-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.time-reset[hidden] {
+    display: none;
+}
+
+.time-reset:hover {
+    border-color: rgba(0, 163, 145, 0.34);
+    color: var(--ink-strong);
+}
+
+.time-reset:focus-visible {
+    outline: none;
+    border-color: #00a391;
+    box-shadow: 0 0 0 3px rgba(0, 163, 145, 0.14);
+}
+
+@media (max-width: 640px) {
+    .composer-schedule {
+        grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
+    }
+
+    .apple-device .composer-schedule {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 400px) {
+    .priority-group {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        width: 100%;
+    }
+
+    .priority-options {
+        flex-direction: column;
+        align-items: flex-start;
+        margin-left: -8px;
+    }
+}
+
+@media (max-width: 420px) {
+    .composer-schedule {
+        grid-template-columns: 1fr;
+        width: min(64%, 220px);
+    }
+
+    .apple-device .composer-schedule {
+        grid-template-columns: 1fr;
+    }
+    
+    .composer-footer .btn-primary {
+        justify-self: end;
+    }
+}
+
+@media (max-width: 520px) {
+    .composer-footer {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    #new-task-due-date,
+    #new-task-due-time {
+        height: 44px;
+        min-height: 44px;
+        border-radius: 11px;
+        padding-inline: 12px;
+        font-size: 0.92rem;
+        background: color-mix(in srgb, var(--surface-strong) 96%, #f4f7fb 4%);
+    }
+
+    #new-task-due-date,
+    #new-task-due-time {
+        padding-right: 52px;
+    }
+
+    .date-field--composer .time-reset,
+    .time-field--composer .time-reset {
+        right: 7px;
+        height: 26px;
+        padding-inline: 9px;
+        font-size: 0.72rem;
+    }
+}
+
+#new-task-due-date {
+    min-width: 0;
+    padding-right: 58px;
+}
+
+#new-task-due-time {
+    min-width: 0;
+}
+
+#new-task-due-date,
+#new-task-due-time {
+    height: 48px;
+    min-height: 48px;
+    padding-block: 0;
+    padding-inline: 14px;
+    line-height: 1.1;
+    border-radius: 12px;
+    font-size: 0.96rem;
+}
+
+#new-task-due-date,
+#new-task-due-time {
+    padding-right: 58px;
+}
+
+#new-task-due-date::-webkit-date-and-time-value,
+#new-task-due-time::-webkit-date-and-time-value {
+    text-align: left;
+}
+
+#new-task-due-date::-webkit-datetime-edit,
+#new-task-due-time::-webkit-datetime-edit {
+    padding: 0;
+}
+
+#new-task-due-time:disabled,
+.task-due-time:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.time-field.is-disabled {
+    cursor: pointer;
+}
+
+/* iOS date fallback: show visible placeholder when empty */
+#new-task-due-date.date-empty-fallback,
+.task-due-date.date-empty-fallback,
+#new-task-due-time.time-empty-fallback,
+.task-due-time.time-empty-fallback {
+    color: var(--ink-muted);
+    -webkit-text-fill-color: var(--ink-muted);
+}
+
+#new-task-due-date:not(.date-empty-fallback),
+#new-task-due-time:not(.time-empty-fallback),
+.task-due-date:not(.date-empty-fallback),
+.task-due-time:not(.time-empty-fallback) {
+    -webkit-text-fill-color: currentColor;
+}
+
+#new-task-due-date.date-empty-fallback::placeholder,
+.task-due-date.date-empty-fallback::placeholder,
+#new-task-due-time.time-empty-fallback::placeholder,
+.task-due-time.time-empty-fallback::placeholder {
+    color: var(--ink-muted);
+    opacity: 1;
+}
+
+/* Footer area of composer form (priority + submit) */
+.composer-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 14px;
+}
+
+/* Priority radio group and chip presentation */
+.priority-group {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.priority-options {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.priority-group legend {
+    padding: 0;
+    margin-bottom: 8px;
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.priority-chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.priority-chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.priority-chip span {
+    border: var(--stroke-thin) solid var(--line);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--ink-muted);
+    background: color-mix(in srgb, var(--surface-strong) 90%, #f8fafc 10%);
+    transition: all 140ms ease;
+}
+
+.priority-chip input:checked + span {
+    border-color: #0d8a7e;
+    color: #045950;
+    background: #dff6f2;
+}
+
+/* Reusable button primitives */
+.btn {
+    border: 0;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 700;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: transform 140ms ease, filter 140ms ease;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.02);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn-primary {
+    background: linear-gradient(140deg, #00a08f, #007f73);
+    color: #ffffff;
+    white-space: nowrap;
+}
+
+.btn-secondary {
+    background: color-mix(in srgb, var(--surface-strong) 80%, #dbe8f4 20%);
+    color: var(--ink-strong);
+}
+
+/* Icon-only theme toggle button */
+.theme-toggle {
+    width: var(--theme-toggle-size);
+    height: var(--theme-toggle-size);
+    min-width: var(--theme-toggle-size);
+    padding: 0;
+    border-radius: 999px;
+    border: var(--stroke-thin) solid var(--line);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.theme-icon {
+    width: calc(var(--theme-toggle-size) * 0.48);
+    height: calc(var(--theme-toggle-size) * 0.48);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+.theme-icon-moon {
+    display: block;
+}
+
+.theme-icon-sun {
+    display: none;
+}
+
+[data-theme="dark"] .theme-icon-moon {
+    display: none;
+}
+
+[data-theme="dark"] .theme-icon-sun {
+    display: block;
+}
+
+.theme-toggle:focus-visible {
+    outline: none;
+    border-color: #00a391;
+    box-shadow: 0 0 0 3px rgba(0, 163, 145, 0.16);
+}
+
+.theme-toggle:hover,
+.theme-toggle:active {
+    transform: none;
+}
+
+.btn-danger {
+    background: color-mix(in srgb, var(--surface-strong) 80%, #ffdede 20%);
+    color: var(--danger);
+}
+
+/* Task panel heading and counters */
+.task-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.task-panel-head h2 {
+    margin: 0;
+    font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+    font-size: 1.4rem;
+}
+
+.task-summary {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    color: var(--ink-muted);
+    font-size: 0.92rem;
+}
+
+.task-summary strong {
+    color: var(--ink-strong);
+}
+
+/* Filter/sort toolbar */
+.task-toolbar {
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.btn-filter {
+    background: color-mix(in srgb, var(--surface-strong) 78%, #dae8f5 22%);
+    color: var(--ink-muted);
+    border: var(--stroke-thin) solid transparent;
+    padding-inline: 14px;
+}
+
+.btn-filter.is-active {
+    color: var(--ink-strong);
+    border-color: var(--line);
+}
+
+.sort-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink-muted);
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+#sort-mode,
+#priority-filter {
+    border: var(--stroke-thin) solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-strong);
+    color: var(--ink-strong);
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 8px 10px;
+}
+
+.task-toolbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* Dynamic task list layout */
+.tasks-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 11px;
+}
+
+/* Individual task card */
+.task {
+    border: var(--stroke-thin) solid var(--line);
+    border-left-width: var(--task-accent-size);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    background: var(--surface-strong);
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 12px;
+    align-items: center;
+    animation: lift-in 220ms ease both;
+}
+
+.task-main {
+    min-width: 0;
+}
+
+.task-desc {
+    width: 100%;
+    border: var(--stroke-thin) solid transparent;
+    border-radius: 8px;
+    padding: 7px 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    color: var(--ink-strong);
+    background: transparent;
+    transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.task-desc:focus-visible {
+    outline: none;
+    border-color: #97b7d8;
+    background: #f6fbff;
+}
+
+.task-state {
+    margin-top: 4px;
+    font-size: 0.79rem;
+    color: var(--ink-muted);
+}
+
+.task-meta {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.task-schedule-fields {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.due-badge {
+    margin: 0;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--ink-strong);
+    background: color-mix(in srgb, var(--surface-strong) 80%, #dce7f5 20%);
+}
+
+.due-badge.overdue {
+    color: #ffffff;
+    background: #c74343;
+}
+
+.task-meta--stack-schedule .task-schedule-fields {
+    flex: 1 0 100%;
+}
+
+.task-due-date,
+.task-due-time {
+    border: var(--stroke-thin) solid var(--line);
+    border-radius: 8px;
+    padding: 5px 8px;
+    background: var(--surface-strong);
+    color: var(--ink-strong);
+    font-size: 0.85rem;
+    font-family: inherit;
+}
+
+.task-due-time {
+    padding-right: 50px;
+}
+
+.task-due-date {
+    padding-right: 50px;
+}
+
+.date-field--task .time-reset,
+.time-field--task .time-reset {
+    right: 6px;
+    height: 24px;
+    padding-inline: 8px;
+    font-size: 0.7rem;
+}
+
+.task-meta .date-field--task,
+.task-meta .time-field--task {
+    max-width: 100%;
+}
+
+.task-meta .task-due-date,
+.task-meta .task-due-time {
+    width: 100%;
+}
+
+/* Site desktop / large screens */
+@media (min-width: 761px) {
+    .task-meta .date-field--task {
+        width: 185px;
+        flex: 0 1 185px;
+    }
+
+    .task-meta .time-field--task {
+        width: 155px;
+        flex: 0 1 155px;
+    }
+}
+
+/* iPhone */
+@media (max-width: 520px) {
+    .apple-device .task-meta .date-field--task {
+        width: 160px;
+        flex: 0 1 160px;
+    }
+
+    .apple-device .task-meta .time-field--task {
+        width: 140px;
+        flex: 0 1 140px;
+    }
+}
+
+/* iPad */
+@media (min-width: 521px) {
+    .apple-device .task-meta .date-field--task {
+        width: 160px;
+        flex: 0 1 160px;
+    }
+
+    .apple-device .time-field--task {
+        width: 140px;
+        flex: 0 1 140px;
+    }
+}
+
+
+/* Completed task visual state */
+.task.done .task-desc {
+    text-decoration: line-through;
+    color: #77889d;
+}
+
+.task-priority {
+    border: var(--stroke-thin) solid var(--line);
+    border-radius: 8px;
+    padding: 7px 9px;
+    background: var(--surface-strong);
+    color: var(--ink-strong);
+    font-size: 0.9rem;
+    font-family: inherit;
+}
+
+#sort-mode:focus-visible,
+#priority-filter:focus-visible,
+.task-priority:focus-visible,
+.task-due-date:focus-visible,
+.task-due-time:focus-visible {
+    outline: none;
+    border-color: #00a391;
+    box-shadow: 0 0 0 3px rgba(0, 163, 145, 0.14);
+}
+
+.task-actions {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.task.is-spotlight {
+    border-color: rgba(0, 163, 145, 0.34);
+    box-shadow:
+        0 0 0 3px rgba(0, 163, 145, 0.14),
+        var(--shadow-soft);
+    animation: spotlight-pulse 820ms ease;
+}
+
+.priority-high {
+    border-left-color: #d64a4a;
+}
+
+.priority-medium {
+    border-left-color: #dd9b2f;
+}
+
+.priority-low {
+    border-left-color: #2b9f74;
+}
+
+.toast-region {
+    position: fixed;
+    top: calc(18px + env(safe-area-inset-top, 0));
+    right: 18px;
+    width: min(360px, calc(100vw - 24px));
+    display: grid;
+    gap: 10px;
+    z-index: 60;
+    pointer-events: none;
+}
+
+.toast {
+    pointer-events: auto;
+    border: var(--stroke-thin) solid var(--panel-border);
+    border-radius: 18px;
+    padding: 14px;
+    background: var(--toast-surface);
+    box-shadow: var(--toast-shadow);
+    backdrop-filter: blur(12px);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toast.is-entering {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+}
+
+.toast.is-leaving {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+}
+
+.toast--success {
+    border-color: var(--toast-success-border);
+    background: var(--toast-success-surface);
+}
+
+.toast--warning {
+    border-color: var(--toast-warning-border);
+    background: var(--toast-warning-surface);
+}
+
+.toast-title {
+    margin: 0 0 4px;
+    font-size: 0.96rem;
+    font-weight: 700;
+}
+
+.toast-message {
+    margin: 0;
+    color: var(--ink-muted);
+    font-size: 0.88rem;
+    line-height: 1.45;
+}
+
+.toast-actions {
+    margin-top: 11px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.toast-action {
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+}
+
+.toast-dismiss {
+    border: 0;
+    background: transparent;
+    color: var(--ink-muted);
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 8px 4px;
+    cursor: pointer;
+}
+
+.toast-dismiss:hover {
+    color: var(--ink-strong);
+}
+
+.toast-dismiss:focus-visible {
+    outline: none;
+    color: var(--ink-strong);
+}
+
+.celebration-layer {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 55;
+}
+
+.confetti-piece {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0) - 28px);
+    width: 10px;
+    height: 18px;
+    border-radius: 3px;
+    background: var(--confetti-color);
+    box-shadow: 0 8px 18px rgba(19, 31, 46, 0.14);
+    opacity: 0;
+    transform: translate3d(0, -18px, 0) rotate(0deg);
+    animation: confetti-fall var(--confetti-duration) cubic-bezier(0.2, 0.75, 0.24, 1) forwards;
+    animation-delay: var(--confetti-delay);
+}
+
+/* Empty state message when no tasks are visible */
+.empty-state {
+    margin: 10px 0 0;
+    border: var(--stroke-thin) dashed var(--line);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    text-align: center;
+    color: var(--ink-muted);
+    background: color-mix(in srgb, var(--surface-strong) 75%, #f8fbff 25%);
+}
+
+/* Utility class for screen-reader-only labels */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Entrance animations */
+@keyframes rise-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes lift-in {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes spotlight-pulse {
+    0% {
+        transform: translateY(0);
+    }
+
+    40% {
+        transform: translateY(-2px);
+    }
+
+    100% {
+        transform: translateY(0);
+    }
+}
+
+@keyframes confetti-fall {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, -20px, 0) rotate(0deg) scale(0.86);
+    }
+
+    12% {
+        opacity: 1;
+    }
+
+    78% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate3d(var(--confetti-drift), calc(100vh + 72px), 0) rotate(var(--confetti-rotate)) scale(1);
+    }
+}
+
+/* Tablet and small-screen adaptations */
+@media (max-width: 760px) {
+    body {
+        padding: 18px 12px 24px;
+    }
+
+    .panel,
+    .hero {
+        padding: 18px;
+        border-radius: 18px;
+    }
+
+    .task {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .hero {
+        position: relative;
+    }
+
+    .hero-copy {
+        padding-right: calc(var(--theme-toggle-size) + 32px);
+    }
+
+    .theme-toggle {
+        --theme-toggle-size: 40px;
+        position: absolute;
+        right: 18px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .theme-toggle:hover,
+    .theme-toggle:active {
+        transform: translateY(-50%);
+    }
+
+    .hero-title-row {
+        justify-content: flex-start;
+        align-items: center;
+    }
+
+    .hero-subtitle {
+        padding-right: calc(var(--theme-toggle-size) + 32px);
+    }
+
+    .hero-tools {
+        padding-right: calc(var(--theme-toggle-size) + 32px);
+    }
+
+    .task-priority {
+        width: fit-content;
+    }
+
+    .task-actions {
+        justify-content: flex-start;
+    }
+
+    #new-task-due-date,
+    #new-task-due-time {
+        width: 100%;
+    }
+
+    .toast-region {
+        top: calc(12px + env(safe-area-inset-top, 0));
+        left: 12px;
+        right: 12px;
+        width: auto;
+    }
+
+    .confetti-piece {
+        top: calc(env(safe-area-inset-top, 0) - 28px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .toast,
+    .task.is-spotlight,
+    .confetti-piece {
+        animation: none;
+        transition: none;
+    }
+
+    .confetti-piece {
+        opacity: 0;
+    }
+}
