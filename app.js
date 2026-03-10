@@ -5,10 +5,12 @@
     const VIEW_STATE_KEY = "focusboard-view-state";
     const COMPOSER_DRAFT_KEY = "focusboard-composer-draft";
     const TASK_NOTIFICATION_STATE_KEY = "focusboard-task-notification-state";
+    const NOTIFICATION_PROMPT_STATE_KEY = "focusboard-notification-prompt-state";
     const IOS_DATE_PLACEHOLDER = "MM/DD/YYYY";
     const IOS_TIME_PLACEHOLDER = "HH:MM";
     const DATE_REQUIRED_FOR_TIME_MESSAGE = "Please choose a date before adding a time.";
     const DUE_SOON_MINUTES = 30;
+    const NOTIFICATION_PROMPT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
     const STATUS_FILTERS = ["all", "active", "completed"];
     const PRIORITY_LEVELS = ["High", "Medium", "Low"];
     const SORT_MODES = ["newest", "oldest", "priority-desc", "priority-asc", "due-soon", "due-late"];
@@ -76,8 +78,12 @@
     const priorityFilterSelect = document.querySelector("#priority-filter");
     const sortModeSelect = document.querySelector("#sort-mode");
     const themeToggle = document.querySelector("#theme-toggle");
-    const notificationToggle = document.querySelector("#notification-toggle");
-    const notificationStatus = document.querySelector("#notification-status");
+    const notificationModal = document.querySelector("#notification-modal");
+    const notificationModalTitle = document.querySelector("#notification-modal-title");
+    const notificationModalMessage = document.querySelector("#notification-modal-message");
+    const notificationModalConfirmButton = document.querySelector("#notification-modal-confirm");
+    const notificationModalDeclineButton = document.querySelector("#notification-modal-decline");
+    const notificationModalDismissButton = document.querySelector("#notification-modal-dismiss");
     const composerPriorityInputs = Array.from(document.querySelectorAll("input[name='priority']"));
     const toastRegion = document.querySelector("#toast-region");
     const celebrationLayer = document.querySelector("#celebration-layer");
@@ -89,6 +95,7 @@
     const useIOSDateFallback = shouldUseIOSDateFallback();
     document.documentElement.classList.toggle("apple-device", useIOSDateFallback);
     let taskNotificationState = loadTaskNotificationState();
+    let notificationPromptState = loadNotificationPromptState();
     let lastTimedRefreshKey = getCurrentLocalMinuteKey();
     let taskMetaLayoutFrame = 0;
 
@@ -184,6 +191,20 @@
     // Persist alert tracking so the same due moment is only announced once per task.
     function saveTaskNotificationState() {
         setStorageItem(TASK_NOTIFICATION_STATE_KEY, JSON.stringify(taskNotificationState));
+    }
+
+    // Restore how often the alert opt-in modal has been shown and whether the user responded.
+    function loadNotificationPromptState() {
+        const storedState = getStoredJSON(NOTIFICATION_PROMPT_STATE_KEY) || {};
+        return {
+            status: storedState.status === "accepted" || storedState.status === "declined" ? storedState.status : "pending",
+            lastShownAt: Number(storedState.lastShownAt) || 0
+        };
+    }
+
+    // Persist the alert opt-in modal state across launches.
+    function saveNotificationPromptState() {
+        setStorageItem(NOTIFICATION_PROMPT_STATE_KEY, JSON.stringify(notificationPromptState));
     }
 
     // Drop tasks that no longer exist from the stored notification map.
@@ -294,39 +315,79 @@
         return isNotificationSupported() && Notification.permission === "granted";
     }
 
-    // Keep the alert-permission control in sync with the current browser permission.
-    function updateNotificationUI() {
-        if (!notificationToggle || !notificationStatus) {
+    // Switch the alert opt-in modal between prompt and result states.
+    function setNotificationModalState(mode) {
+        if (!notificationModalTitle || !notificationModalMessage || !notificationModalConfirmButton || !notificationModalDeclineButton || !notificationModalDismissButton) {
             return;
         }
 
-        if (!isNotificationSupported()) {
-            notificationToggle.textContent = "Alerts unavailable";
-            notificationToggle.dataset.state = "unavailable";
-            notificationToggle.disabled = true;
-            notificationStatus.textContent = "Browser alerts need HTTPS or localhost. In-app reminders still work while the page is visible.";
+        if (mode === "enabled") {
+            notificationModalTitle.textContent = "Alerts are on";
+            notificationModalMessage.textContent = `You will be reminded ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue while this app stays open.`;
+            notificationModalConfirmButton.hidden = true;
+            notificationModalDeclineButton.hidden = true;
+            notificationModalDismissButton.hidden = false;
             return;
         }
 
-        notificationToggle.disabled = false;
-
-        if (Notification.permission === "granted") {
-            notificationToggle.textContent = "Alerts enabled";
-            notificationToggle.dataset.state = "granted";
-            notificationStatus.textContent = `Browser alerts are on. You will be reminded ${DUE_SOON_MINUTES} minutes before a timed task is due and again if it becomes overdue while this app stays open.`;
+        if (mode === "off") {
+            notificationModalTitle.textContent = "Alerts are still off";
+            notificationModalMessage.textContent = "You can keep using in-app reminders while this page is open.";
+            notificationModalConfirmButton.hidden = true;
+            notificationModalDeclineButton.hidden = true;
+            notificationModalDismissButton.hidden = false;
             return;
         }
 
-        if (Notification.permission === "denied") {
-            notificationToggle.textContent = "Alerts blocked";
-            notificationToggle.dataset.state = "denied";
-            notificationStatus.textContent = "Browser alerts are blocked for this site. Re-enable notifications in your browser settings to receive due alerts when the tab is hidden.";
+        notificationModalTitle.textContent = "Turn on alerts?";
+        notificationModalMessage.textContent = `Get reminded ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`;
+        notificationModalConfirmButton.hidden = false;
+        notificationModalDeclineButton.hidden = false;
+        notificationModalDismissButton.hidden = true;
+    }
+
+    // Open the alert opt-in modal and mark this launch as a shown prompt.
+    function openNotificationModal() {
+        if (!notificationModal) {
             return;
         }
 
-        notificationToggle.textContent = "Enable alerts";
-        notificationToggle.dataset.state = "default";
-        notificationStatus.textContent = `Enable browser alerts to get reminders ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`;
+        setNotificationModalState("prompt");
+        notificationModal.hidden = false;
+        document.body.classList.add("modal-open");
+        notificationPromptState.lastShownAt = Date.now();
+        saveNotificationPromptState();
+        notificationModalConfirmButton.focus();
+    }
+
+    // Close the alert opt-in modal.
+    function closeNotificationModal() {
+        if (!notificationModal) {
+            return;
+        }
+
+        notificationModal.hidden = true;
+        document.body.classList.remove("modal-open");
+    }
+
+    // Prompt only once per week until the user explicitly accepts or declines.
+    function shouldShowNotificationModal() {
+        if (!notificationModal || !isNotificationSupported()) {
+            return false;
+        }
+
+        if (notificationPromptState.status !== "pending" || Notification.permission !== "default") {
+            return false;
+        }
+
+        return !notificationPromptState.lastShownAt || (Date.now() - notificationPromptState.lastShownAt) >= NOTIFICATION_PROMPT_INTERVAL_MS;
+    }
+
+    // Persist the user's choice so the weekly prompt stops after accept or decline.
+    function resolveNotificationPrompt(status) {
+        notificationPromptState.status = status;
+        notificationPromptState.lastShownAt = Date.now();
+        saveNotificationPromptState();
     }
 
     // Deliver a browser-level alert when the page is hidden.
@@ -1801,52 +1862,43 @@
         applyTheme(currentTheme === "dark" ? "light" : "dark");
     });
 
-    if (notificationToggle) {
-        notificationToggle.addEventListener("click", function () {
+    if (notificationModalConfirmButton) {
+        notificationModalConfirmButton.addEventListener("click", function () {
+            resolveNotificationPrompt("accepted");
+
             if (!isNotificationSupported()) {
-                updateNotificationUI();
-                return;
-            }
-
-            if (Notification.permission === "granted") {
-                showToast({
-                    variant: "success",
-                    title: "Alerts already enabled",
-                    message: `Focus Board can already alert you ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`
-                });
-                updateNotificationUI();
-                return;
-            }
-
-            if (Notification.permission === "denied") {
-                showToast({
-                    variant: "warning",
-                    title: "Browser alerts are blocked",
-                    message: "Allow notifications for this site in your browser settings to re-enable hidden-tab due alerts."
-                });
-                updateNotificationUI();
+                setNotificationModalState("off");
+                notificationModalDismissButton.focus();
                 return;
             }
 
             Notification.requestPermission().then(function (permission) {
-                updateNotificationUI();
-
                 if (permission === "granted") {
-                    showToast({
-                        variant: "success",
-                        title: "Alerts enabled",
-                        message: "Browser alerts are ready for timed tasks that are due soon or overdue."
-                    });
+                    setNotificationModalState("enabled");
                     processTaskNotifications();
+                    notificationModalDismissButton.focus();
                     return;
                 }
 
-                showToast({
-                    variant: "warning",
-                    title: "Alerts not enabled",
-                    message: "You can keep using in-app reminders while this page is open."
-                });
+                setNotificationModalState("off");
+                notificationModalDismissButton.focus();
+            }).catch(function () {
+                setNotificationModalState("off");
+                notificationModalDismissButton.focus();
             });
+        });
+    }
+
+    if (notificationModalDeclineButton) {
+        notificationModalDeclineButton.addEventListener("click", function () {
+            resolveNotificationPrompt("declined");
+            closeNotificationModal();
+        });
+    }
+
+    if (notificationModalDismissButton) {
+        notificationModalDismissButton.addEventListener("click", function () {
+            closeNotificationModal();
         });
     }
 
@@ -1876,8 +1928,11 @@
     restoreViewState();
     initializeTheme();
     pruneTaskNotificationState();
-    updateNotificationUI();
     syncNotificationsAndRender();
+
+    if (shouldShowNotificationModal()) {
+        openNotificationModal();
+    }
 
     window.setInterval(function () {
         refreshTimedState(false);
