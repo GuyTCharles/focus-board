@@ -973,11 +973,17 @@ body.modal-open {
     color: var(--hero-kicker);
 }
 
+.app-modal-title,
 .app-modal-dialog h2 {
     margin: 0;
     font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
-    font-size: clamp(1.35rem, 3.8vw, 1.9rem);
+    font-size: clamp(1.34rem, 3.2vw, 1.78rem);
     line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 650;
+    color: var(--ink-strong);
+    text-wrap: balance;
+    max-width: 14ch;
 }
 
 .app-modal-dialog p {
