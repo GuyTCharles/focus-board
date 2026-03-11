@@ -5,12 +5,10 @@
     const VIEW_STATE_KEY = "focusboard-view-state";
     const COMPOSER_DRAFT_KEY = "focusboard-composer-draft";
     const TASK_NOTIFICATION_STATE_KEY = "focusboard-task-notification-state";
-    const NOTIFICATION_PROMPT_STATE_KEY = "focusboard-notification-prompt-state";
     const IOS_DATE_PLACEHOLDER = "MM/DD/YYYY";
     const IOS_TIME_PLACEHOLDER = "HH:MM";
     const DATE_REQUIRED_FOR_TIME_MESSAGE = "Please choose a date before adding a time.";
     const DUE_SOON_MINUTES = 30;
-    const NOTIFICATION_PROMPT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
     const TIMED_REFRESH_INTERVAL_MS = 15000;
     const STATUS_FILTERS = ["all", "active", "completed"];
     const PRIORITY_LEVELS = ["High", "Medium", "Low"];
@@ -79,12 +77,6 @@
     const priorityFilterSelect = document.querySelector("#priority-filter");
     const sortModeSelect = document.querySelector("#sort-mode");
     const themeToggle = document.querySelector("#theme-toggle");
-    const notificationModal = document.querySelector("#notification-modal");
-    const notificationModalTitle = document.querySelector("#notification-modal-title");
-    const notificationModalMessage = document.querySelector("#notification-modal-message");
-    const notificationModalConfirmButton = document.querySelector("#notification-modal-confirm");
-    const notificationModalDeclineButton = document.querySelector("#notification-modal-decline");
-    const notificationModalDismissButton = document.querySelector("#notification-modal-dismiss");
     const composerPriorityInputs = Array.from(document.querySelectorAll("input[name='priority']"));
     const toastRegion = document.querySelector("#toast-region");
     const celebrationLayer = document.querySelector("#celebration-layer");
@@ -96,7 +88,6 @@
     const useIOSDateFallback = shouldUseIOSDateFallback();
     document.documentElement.classList.toggle("apple-device", useIOSDateFallback);
     let taskNotificationState = loadTaskNotificationState();
-    let notificationPromptState = loadNotificationPromptState();
     let lastTimedRefreshKey = getTimedRefreshKey();
     let taskMetaLayoutFrame = 0;
 
@@ -192,20 +183,6 @@
     // Persist alert tracking so the same due moment is only announced once per task.
     function saveTaskNotificationState() {
         setStorageItem(TASK_NOTIFICATION_STATE_KEY, JSON.stringify(taskNotificationState));
-    }
-
-    // Restore how often the alert opt-in modal has been shown and whether the user responded.
-    function loadNotificationPromptState() {
-        const storedState = getStoredJSON(NOTIFICATION_PROMPT_STATE_KEY) || {};
-        return {
-            status: storedState.status === "accepted" || storedState.status === "declined" ? storedState.status : "pending",
-            lastShownAt: Number(storedState.lastShownAt) || 0
-        };
-    }
-
-    // Persist the alert opt-in modal state across launches.
-    function saveNotificationPromptState() {
-        setStorageItem(NOTIFICATION_PROMPT_STATE_KEY, JSON.stringify(notificationPromptState));
     }
 
     // Drop tasks that no longer exist from the stored notification map.
@@ -306,99 +283,6 @@
         }
     }
 
-    // Treat the installed / standalone experience as the app context.
-    function isStandaloneAppContext() {
-        const supportsMatchMedia = typeof window.matchMedia === "function";
-        const isStandaloneDisplay = supportsMatchMedia && window.matchMedia("(display-mode: standalone)").matches;
-        const isIOSStandalone = Boolean(window.navigator && window.navigator.standalone);
-
-        return isStandaloneDisplay || isIOSStandalone;
-    }
-
-    // Optional due-soon alerts are only active after the user opts in from the modal.
-    function areTaskAlertsEnabled() {
-        return notificationPromptState.status === "accepted" && isStandaloneAppContext();
-    }
-
-    // Switch the alert opt-in modal between prompt and result states.
-    function setNotificationModalState(mode) {
-        if (!notificationModalTitle || !notificationModalMessage || !notificationModalConfirmButton || !notificationModalDeclineButton || !notificationModalDismissButton) {
-            return;
-        }
-
-        if (mode === "enabled") {
-            notificationModalTitle.textContent = "Alerts are on";
-            notificationModalMessage.textContent = `Reminders will appear ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`;
-            notificationModalConfirmButton.hidden = true;
-            notificationModalDeclineButton.hidden = true;
-            notificationModalDismissButton.hidden = false;
-            return;
-        }
-
-        if (mode === "off") {
-            notificationModalTitle.textContent = "Alerts are off";
-            notificationModalMessage.textContent = "Reminders will stay off.";
-            notificationModalConfirmButton.hidden = true;
-            notificationModalDeclineButton.hidden = true;
-            notificationModalDismissButton.hidden = false;
-            return;
-        }
-
-        notificationModalTitle.textContent = "Turn on alerts";
-        notificationModalMessage.textContent = `Get a reminder ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`;
-        notificationModalConfirmButton.hidden = false;
-        notificationModalDeclineButton.hidden = false;
-        notificationModalDismissButton.hidden = true;
-        notificationModalConfirmButton.textContent = "Turn on Alerts";
-        notificationModalDeclineButton.textContent = "Turn off Alerts";
-        notificationModalDismissButton.textContent = "Continue";
-    }
-
-    // Open the alert opt-in modal after a qualifying task-add action.
-    function openNotificationModal() {
-        if (!notificationModal) {
-            return false;
-        }
-
-        setNotificationModalState("prompt");
-        notificationModal.hidden = false;
-        document.body.classList.add("modal-open");
-        notificationPromptState.lastShownAt = Date.now();
-        saveNotificationPromptState();
-        notificationModalConfirmButton.focus();
-        return true;
-    }
-
-    // Close the alert opt-in modal.
-    function closeNotificationModal() {
-        if (!notificationModal) {
-            return;
-        }
-
-        notificationModal.hidden = true;
-        document.body.classList.remove("modal-open");
-    }
-
-    // Prompt only once per week after a successful add until the user explicitly accepts or declines.
-    function shouldShowNotificationModal() {
-        if (!notificationModal || !isStandaloneAppContext()) {
-            return false;
-        }
-
-        if (notificationPromptState.status !== "pending") {
-            return false;
-        }
-
-        return !notificationPromptState.lastShownAt || (Date.now() - notificationPromptState.lastShownAt) >= NOTIFICATION_PROMPT_INTERVAL_MS;
-    }
-
-    // Persist the user's choice so the weekly prompt stops after accept or decline.
-    function resolveNotificationPrompt(status) {
-        notificationPromptState.status = status;
-        notificationPromptState.lastShownAt = Date.now();
-        saveNotificationPromptState();
-    }
-
     // Create a denser confetti burst for task completions.
     function launchConfetti() {
         if (!celebrationLayer) {
@@ -466,11 +350,12 @@
 
     // Warn when a timed task is entering the due-soon window.
     function alertDueSoonTask(task) {
-        if (!areTaskAlertsEnabled() || document.hidden) {
+        if (document.hidden) {
             return false;
         }
 
         showToast({
+            variant: "warning",
             title: pickRandom(DUE_SOON_TITLES),
             message: `${task.description} is due ${formatDate(task.dueDate, task.dueTime)}.`,
             actionLabel: "Focus task",
@@ -1108,7 +993,6 @@
     // Detect due-soon and overdue transitions and announce each due moment only once.
     function processTaskNotifications() {
         const now = new Date();
-        const dueSoonAlertsEnabled = areTaskAlertsEnabled();
         const nextState = {};
 
         tasks.forEach(task => {
@@ -1123,7 +1007,7 @@
 
             const minutesUntilDue = Math.ceil((dueMomentDate.getTime() - now.getTime()) / 60000);
 
-            if (dueSoonAlertsEnabled && task.dueTime && minutesUntilDue > 0 && minutesUntilDue <= DUE_SOON_MINUTES) {
+            if (task.dueTime && minutesUntilDue > 0 && minutesUntilDue <= DUE_SOON_MINUTES) {
                 if (previousState.soon === dueMoment || alertDueSoonTask(task)) {
                     nextTaskState.soon = dueMoment;
                 }
@@ -1812,10 +1696,7 @@
             setSelectedComposerPriority("High");
             syncComposerTimeInputState();
             saveComposerDraft();
-
-            if (!shouldShowNotificationModal() || !openNotificationModal()) {
-                taskInput.focus();
-            }
+            taskInput.focus();
         }
     });
 
@@ -1848,28 +1729,6 @@
         const currentTheme = document.documentElement.getAttribute("data-theme");
         applyTheme(currentTheme === "dark" ? "light" : "dark");
     });
-
-    if (notificationModalConfirmButton) {
-        notificationModalConfirmButton.addEventListener("click", function () {
-            resolveNotificationPrompt("accepted");
-            setNotificationModalState("enabled");
-            processTaskNotifications();
-            notificationModalDismissButton.focus();
-        });
-    }
-
-    if (notificationModalDeclineButton) {
-        notificationModalDeclineButton.addEventListener("click", function () {
-            resolveNotificationPrompt("declined");
-            closeNotificationModal();
-        });
-    }
-
-    if (notificationModalDismissButton) {
-        notificationModalDismissButton.addEventListener("click", function () {
-            closeNotificationModal();
-        });
-    }
 
     if (taskDueTimeResetButton) {
         taskDueTimeResetButton.addEventListener("click", function () {
