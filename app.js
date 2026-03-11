@@ -328,7 +328,7 @@
 
         if (mode === "enabled") {
             notificationModalTitle.textContent = "Alerts are on";
-            notificationModalMessage.textContent = `You will see a Focus Board reminder ${DUE_SOON_MINUTES} minutes before a timed task is due while this app stays open. Overdue encouragement stays built in.`;
+            notificationModalMessage.textContent = `Reminders will appear ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`;
             notificationModalConfirmButton.hidden = true;
             notificationModalDeclineButton.hidden = true;
             notificationModalDismissButton.hidden = false;
@@ -336,19 +336,22 @@
         }
 
         if (mode === "off") {
-            notificationModalTitle.textContent = "Alerts are still off";
-            notificationModalMessage.textContent = "Focus Board will keep optional due-soon reminders off. Overdue encouragement stays built in.";
+            notificationModalTitle.textContent = "Alerts are off";
+            notificationModalMessage.textContent = "Reminders will stay off.";
             notificationModalConfirmButton.hidden = true;
             notificationModalDeclineButton.hidden = true;
             notificationModalDismissButton.hidden = false;
             return;
         }
 
-        notificationModalTitle.textContent = "Turn on alerts?";
-        notificationModalMessage.textContent = `See a Focus Board reminder ${DUE_SOON_MINUTES} minutes before a timed task is due while this app stays open. Overdue encouragement stays built in.`;
+        notificationModalTitle.textContent = "Turn on alerts";
+        notificationModalMessage.textContent = `Get a reminder ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`;
         notificationModalConfirmButton.hidden = false;
         notificationModalDeclineButton.hidden = false;
         notificationModalDismissButton.hidden = true;
+        notificationModalConfirmButton.textContent = "Turn on Alerts";
+        notificationModalDeclineButton.textContent = "Turn off Alerts";
+        notificationModalDismissButton.textContent = "Continue";
     }
 
     // Open the alert opt-in modal after a qualifying task-add action.
