@@ -928,79 +928,6 @@ body {
     color: var(--ink-strong);
 }
 
-body.modal-open {
-    overflow: hidden;
-}
-
-.app-modal[hidden] {
-    display: none;
-}
-
-.app-modal {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    display: grid;
-    place-items: center;
-    padding: 18px;
-}
-
-.app-modal-backdrop {
-    position: absolute;
-    inset: 0;
-    background: rgba(14, 20, 29, 0.52);
-    backdrop-filter: blur(7px);
-}
-
-.app-modal-dialog {
-    position: relative;
-    width: min(460px, 100%);
-    border: var(--stroke-thin) solid var(--panel-border);
-    border-radius: 24px;
-    padding: 24px;
-    background: color-mix(in srgb, var(--surface-strong) 92%, #f7fbff 8%);
-    box-shadow: 0 28px 70px rgba(19, 31, 46, 0.28);
-    display: grid;
-    gap: 14px;
-}
-
-.app-modal-kicker {
-    margin: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    font-size: 0.74rem;
-    font-weight: 700;
-    color: var(--hero-kicker);
-}
-
-.app-modal-title,
-.app-modal-dialog h2 {
-    margin: 0;
-    font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
-    font-size: clamp(1.34rem, 3.2vw, 1.78rem);
-    line-height: 1.08;
-    letter-spacing: -0.02em;
-    font-weight: 650;
-    color: var(--ink-strong);
-    text-wrap: balance;
-    max-width: 14ch;
-}
-
-.app-modal-dialog p {
-    margin: 0;
-    color: var(--ink-muted);
-    font-size: 0.98rem;
-    line-height: 1.55;
-}
-
-.app-modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-}
-
 .celebration-layer {
     position: fixed;
     inset: 0;
@@ -1171,23 +1098,6 @@ body.modal-open {
         left: 12px;
         right: 12px;
         width: auto;
-    }
-
-    .app-modal {
-        padding: 12px;
-    }
-
-    .app-modal-dialog {
-        padding: 20px;
-        border-radius: 20px;
-    }
-
-    .app-modal-actions {
-        justify-content: stretch;
-    }
-
-    .app-modal-actions .btn {
-        width: 100%;
     }
 
     .confetti-piece {
