@@ -11,6 +11,7 @@
     const DATE_REQUIRED_FOR_TIME_MESSAGE = "Please choose a date before adding a time.";
     const DUE_SOON_MINUTES = 30;
     const NOTIFICATION_PROMPT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+    const TIMED_REFRESH_INTERVAL_MS = 15000;
     const STATUS_FILTERS = ["all", "active", "completed"];
     const PRIORITY_LEVELS = ["High", "Medium", "Low"];
     const SORT_MODES = ["newest", "oldest", "priority-desc", "priority-asc", "due-soon", "due-late"];
@@ -96,7 +97,7 @@
     document.documentElement.classList.toggle("apple-device", useIOSDateFallback);
     let taskNotificationState = loadTaskNotificationState();
     let notificationPromptState = loadNotificationPromptState();
-    let lastTimedRefreshKey = getCurrentLocalMinuteKey();
+    let lastTimedRefreshKey = getTimedRefreshKey();
     let taskMetaLayoutFrame = 0;
 
     // In-memory state loaded once at startup.
@@ -314,7 +315,7 @@
         return isStandaloneDisplay || isIOSStandalone;
     }
 
-    // App alerts are only active after the user opts in from the modal.
+    // Optional due-soon alerts are only active after the user opts in from the modal.
     function areTaskAlertsEnabled() {
         return notificationPromptState.status === "accepted" && isStandaloneAppContext();
     }
@@ -327,7 +328,7 @@
 
         if (mode === "enabled") {
             notificationModalTitle.textContent = "Alerts are on";
-            notificationModalMessage.textContent = `You will see reminders in Focus Board ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue while this app stays open.`;
+            notificationModalMessage.textContent = `You will see a Focus Board reminder ${DUE_SOON_MINUTES} minutes before a timed task is due while this app stays open. Overdue encouragement stays built in.`;
             notificationModalConfirmButton.hidden = true;
             notificationModalDeclineButton.hidden = true;
             notificationModalDismissButton.hidden = false;
@@ -336,7 +337,7 @@
 
         if (mode === "off") {
             notificationModalTitle.textContent = "Alerts are still off";
-            notificationModalMessage.textContent = "Focus Board will keep alerts off while this app stays open.";
+            notificationModalMessage.textContent = "Focus Board will keep optional due-soon reminders off. Overdue encouragement stays built in.";
             notificationModalConfirmButton.hidden = true;
             notificationModalDeclineButton.hidden = true;
             notificationModalDismissButton.hidden = false;
@@ -344,7 +345,7 @@
         }
 
         notificationModalTitle.textContent = "Turn on alerts?";
-        notificationModalMessage.textContent = `See reminders in Focus Board ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue while this app stays open.`;
+        notificationModalMessage.textContent = `See a Focus Board reminder ${DUE_SOON_MINUTES} minutes before a timed task is due while this app stays open. Overdue encouragement stays built in.`;
         notificationModalConfirmButton.hidden = false;
         notificationModalDeclineButton.hidden = false;
         notificationModalDismissButton.hidden = true;
@@ -456,7 +457,7 @@
             variant: "success",
             title: pickRandom(COMPLETION_TITLES),
             message: pickRandom(COMPLETION_MESSAGES),
-            duration: 5600
+            duration: 5000
         });
     }
 
@@ -480,7 +481,7 @@
 
     // Encourage recovery when a task slips overdue.
     function encourageOverdueTask(task) {
-        if (!areTaskAlertsEnabled() || document.hidden) {
+        if (document.hidden) {
             return false;
         }
 
@@ -701,11 +702,15 @@
         return `${toLocalISODate(now)}T${toLocalISOTime(now)}`;
     }
 
-    // Current local time rounded down to the active minute.
-    function getCurrentLocalMinuteDate() {
-        const now = new Date();
-        now.setSeconds(0, 0);
-        return now;
+    // Refresh the timed UI on short slots so due states flip near the real deadline.
+    function getTimedRefreshKey() {
+        return Math.floor(Date.now() / TIMED_REFRESH_INTERVAL_MS);
+    }
+
+    // A due moment counts as passed as soon as the stored local minute begins.
+    function hasDueMomentPassed(dueDate, dueTime) {
+        const dueMomentDate = getDueMomentDate(dueDate, dueTime);
+        return Boolean(dueMomentDate) && dueMomentDate.getTime() <= Date.now();
     }
 
     // Only today's tasks need a moving minimum time.
@@ -1094,18 +1099,13 @@
 
     // A task is overdue only when incomplete and its due moment has already passed.
     function isOverdue(task) {
-        return !task.completed && Boolean(task.dueDate) && getDueMomentKey(task.dueDate, task.dueTime) < getCurrentLocalMinuteKey();
+        return !task.completed && hasDueMomentPassed(task.dueDate, task.dueTime);
     }
 
     // Detect due-soon and overdue transitions and announce each due moment only once.
     function processTaskNotifications() {
-        if (!areTaskAlertsEnabled()) {
-            taskNotificationState = {};
-            saveTaskNotificationState();
-            return;
-        }
-
-        const now = getCurrentLocalMinuteDate();
+        const now = new Date();
+        const dueSoonAlertsEnabled = areTaskAlertsEnabled();
         const nextState = {};
 
         tasks.forEach(task => {
@@ -1118,15 +1118,15 @@
                 return;
             }
 
-            const minutesUntilDue = Math.round((dueMomentDate.getTime() - now.getTime()) / 60000);
+            const minutesUntilDue = Math.ceil((dueMomentDate.getTime() - now.getTime()) / 60000);
 
-            if (task.dueTime && minutesUntilDue > 0 && minutesUntilDue <= DUE_SOON_MINUTES) {
+            if (dueSoonAlertsEnabled && task.dueTime && minutesUntilDue > 0 && minutesUntilDue <= DUE_SOON_MINUTES) {
                 if (previousState.soon === dueMoment || alertDueSoonTask(task)) {
                     nextTaskState.soon = dueMoment;
                 }
             }
 
-            if (dueMomentDate.getTime() < now.getTime()) {
+            if (dueMomentDate.getTime() <= now.getTime()) {
                 if (previousState.overdue === dueMoment || encourageOverdueTask(task)) {
                     nextTaskState.overdue = dueMoment;
                 }
@@ -1147,10 +1147,10 @@
         processTaskNotifications();
     }
 
-    // Refresh overdue UI when the local minute changes, without interrupting active editing.
+    // Refresh timed UI on a short cadence, without interrupting active editing.
     function refreshTimedState(force) {
-        const currentMinuteKey = getCurrentLocalMinuteKey();
-        if (!force && currentMinuteKey === lastTimedRefreshKey) {
+        const currentRefreshKey = getTimedRefreshKey();
+        if (!force && currentRefreshKey === lastTimedRefreshKey) {
             return;
         }
 
@@ -1163,7 +1163,7 @@
             return;
         }
 
-        lastTimedRefreshKey = currentMinuteKey;
+        lastTimedRefreshKey = currentRefreshKey;
         syncComposerTimeInputState();
         syncNotificationsAndRender();
     }
@@ -1898,7 +1898,7 @@
 
     window.setInterval(function () {
         refreshTimedState(false);
-    }, 30000);
+    }, TIMED_REFRESH_INTERVAL_MS);
 
     window.addEventListener("focus", function () {
         refreshTimedState(true);
