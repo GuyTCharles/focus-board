@@ -305,14 +305,9 @@
         }
     }
 
-    // Browser notifications need both API support and a secure origin.
-    function isNotificationSupported() {
-        return typeof window.Notification !== "undefined" && window.isSecureContext;
-    }
-
-    // System notifications are only available after the user grants permission.
-    function canSendSystemNotifications() {
-        return isNotificationSupported() && Notification.permission === "granted";
+    // App alerts are only active after the user opts in from the modal.
+    function areTaskAlertsEnabled() {
+        return notificationPromptState.status === "accepted";
     }
 
     // Switch the alert opt-in modal between prompt and result states.
@@ -323,7 +318,7 @@
 
         if (mode === "enabled") {
             notificationModalTitle.textContent = "Alerts are on";
-            notificationModalMessage.textContent = `You will be reminded ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue while this app stays open.`;
+            notificationModalMessage.textContent = `You will see reminders in Focus Board ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue while this app stays open.`;
             notificationModalConfirmButton.hidden = true;
             notificationModalDeclineButton.hidden = true;
             notificationModalDismissButton.hidden = false;
@@ -332,7 +327,7 @@
 
         if (mode === "off") {
             notificationModalTitle.textContent = "Alerts are still off";
-            notificationModalMessage.textContent = "You can keep using in-app reminders while this page is open.";
+            notificationModalMessage.textContent = "Focus Board will keep alerts off while this app stays open.";
             notificationModalConfirmButton.hidden = true;
             notificationModalDeclineButton.hidden = true;
             notificationModalDismissButton.hidden = false;
@@ -340,16 +335,16 @@
         }
 
         notificationModalTitle.textContent = "Turn on alerts?";
-        notificationModalMessage.textContent = `Get reminded ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue.`;
+        notificationModalMessage.textContent = `See reminders in Focus Board ${DUE_SOON_MINUTES} minutes before a timed task is due and again when it becomes overdue while this app stays open.`;
         notificationModalConfirmButton.hidden = false;
         notificationModalDeclineButton.hidden = false;
         notificationModalDismissButton.hidden = true;
     }
 
-    // Open the alert opt-in modal and mark this launch as a shown prompt.
+    // Open the alert opt-in modal after a qualifying task-add action.
     function openNotificationModal() {
         if (!notificationModal) {
-            return;
+            return false;
         }
 
         setNotificationModalState("prompt");
@@ -358,6 +353,7 @@
         notificationPromptState.lastShownAt = Date.now();
         saveNotificationPromptState();
         notificationModalConfirmButton.focus();
+        return true;
     }
 
     // Close the alert opt-in modal.
@@ -370,13 +366,13 @@
         document.body.classList.remove("modal-open");
     }
 
-    // Prompt only once per week until the user explicitly accepts or declines.
+    // Prompt only once per week after a successful add until the user explicitly accepts or declines.
     function shouldShowNotificationModal() {
-        if (!notificationModal || !isNotificationSupported()) {
+        if (!notificationModal) {
             return false;
         }
 
-        if (notificationPromptState.status !== "pending" || Notification.permission !== "default") {
+        if (notificationPromptState.status !== "pending") {
             return false;
         }
 
@@ -388,34 +384,6 @@
         notificationPromptState.status = status;
         notificationPromptState.lastShownAt = Date.now();
         saveNotificationPromptState();
-    }
-
-    // Deliver a browser-level alert when the page is hidden.
-    function sendSystemNotification(task, kind) {
-        if (!canSendSystemNotifications()) {
-            return;
-        }
-
-        const dueMoment = getDueMomentKey(task.dueDate, task.dueTime);
-        const notificationTitle = kind === "soon" ? "Task due soon" : "Task overdue";
-        const notificationBody =
-            kind === "soon" ?
-            `${task.description} is due ${formatDate(task.dueDate, task.dueTime)}.` :
-            `${task.description} is overdue. Open Focus Board to get it moving again.`;
-
-        try {
-            const notice = new Notification(notificationTitle, {
-                body: notificationBody,
-                tag: `${kind}-${task.id}-${dueMoment}`,
-                icon: "web-icon.png"
-            });
-
-            notice.onclick = function () {
-                window.focus();
-                focusTask(task.id);
-                notice.close();
-            };
-        } catch (error) {}
     }
 
     // Create a denser confetti burst for task completions.
@@ -485,9 +453,8 @@
 
     // Warn when a timed task is entering the due-soon window.
     function alertDueSoonTask(task) {
-        if (document.hidden) {
-            sendSystemNotification(task, "soon");
-            return;
+        if (!areTaskAlertsEnabled() || document.hidden) {
+            return false;
         }
 
         showToast({
@@ -499,13 +466,13 @@
             },
             duration: 6800
         });
+        return true;
     }
 
     // Encourage recovery when a task slips overdue.
     function encourageOverdueTask(task) {
-        if (document.hidden) {
-            sendSystemNotification(task, "overdue");
-            return;
+        if (!areTaskAlertsEnabled() || document.hidden) {
+            return false;
         }
 
         showToast({
@@ -518,6 +485,7 @@
             },
             duration: 7600
         });
+        return true;
     }
 
     // Keep only ISO date values (YYYY-MM-DD).
@@ -1122,6 +1090,12 @@
 
     // Detect due-soon and overdue transitions and announce each due moment only once.
     function processTaskNotifications() {
+        if (!areTaskAlertsEnabled()) {
+            taskNotificationState = {};
+            saveTaskNotificationState();
+            return;
+        }
+
         const now = getCurrentLocalMinuteDate();
         const nextState = {};
 
@@ -1138,17 +1112,15 @@
             const minutesUntilDue = Math.round((dueMomentDate.getTime() - now.getTime()) / 60000);
 
             if (task.dueTime && minutesUntilDue > 0 && minutesUntilDue <= DUE_SOON_MINUTES) {
-                if (previousState.soon !== dueMoment) {
-                    alertDueSoonTask(task);
+                if (previousState.soon === dueMoment || alertDueSoonTask(task)) {
+                    nextTaskState.soon = dueMoment;
                 }
-                nextTaskState.soon = dueMoment;
             }
 
             if (dueMomentDate.getTime() < now.getTime()) {
-                if (previousState.overdue !== dueMoment) {
-                    encourageOverdueTask(task);
+                if (previousState.overdue === dueMoment || encourageOverdueTask(task)) {
+                    nextTaskState.overdue = dueMoment;
                 }
-                nextTaskState.overdue = dueMoment;
             }
 
             if (nextTaskState.soon || nextTaskState.overdue) {
@@ -1828,7 +1800,10 @@
             setSelectedComposerPriority("High");
             syncComposerTimeInputState();
             saveComposerDraft();
-            taskInput.focus();
+
+            if (!shouldShowNotificationModal() || !openNotificationModal()) {
+                taskInput.focus();
+            }
         }
     });
 
@@ -1865,27 +1840,9 @@
     if (notificationModalConfirmButton) {
         notificationModalConfirmButton.addEventListener("click", function () {
             resolveNotificationPrompt("accepted");
-
-            if (!isNotificationSupported()) {
-                setNotificationModalState("off");
-                notificationModalDismissButton.focus();
-                return;
-            }
-
-            Notification.requestPermission().then(function (permission) {
-                if (permission === "granted") {
-                    setNotificationModalState("enabled");
-                    processTaskNotifications();
-                    notificationModalDismissButton.focus();
-                    return;
-                }
-
-                setNotificationModalState("off");
-                notificationModalDismissButton.focus();
-            }).catch(function () {
-                setNotificationModalState("off");
-                notificationModalDismissButton.focus();
-            });
+            setNotificationModalState("enabled");
+            processTaskNotifications();
+            notificationModalDismissButton.focus();
         });
     }
 
@@ -1929,10 +1886,6 @@
     initializeTheme();
     pruneTaskNotificationState();
     syncNotificationsAndRender();
-
-    if (shouldShowNotificationModal()) {
-        openNotificationModal();
-    }
 
     window.setInterval(function () {
         refreshTimedState(false);
