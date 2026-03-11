@@ -305,9 +305,18 @@
         }
     }
 
+    // Treat the installed / standalone experience as the app context.
+    function isStandaloneAppContext() {
+        const supportsMatchMedia = typeof window.matchMedia === "function";
+        const isStandaloneDisplay = supportsMatchMedia && window.matchMedia("(display-mode: standalone)").matches;
+        const isIOSStandalone = Boolean(window.navigator && window.navigator.standalone);
+
+        return isStandaloneDisplay || isIOSStandalone;
+    }
+
     // App alerts are only active after the user opts in from the modal.
     function areTaskAlertsEnabled() {
-        return notificationPromptState.status === "accepted";
+        return notificationPromptState.status === "accepted" && isStandaloneAppContext();
     }
 
     // Switch the alert opt-in modal between prompt and result states.
@@ -368,7 +377,7 @@
 
     // Prompt only once per week after a successful add until the user explicitly accepts or declines.
     function shouldShowNotificationModal() {
-        if (!notificationModal) {
+        if (!notificationModal || !isStandaloneAppContext()) {
             return false;
         }
 
