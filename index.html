@@ -141,6 +141,22 @@
             <p id="empty-state" class="empty-state">No tasks yet. Add your first task above.</p>
         </section>
     </main>
+    <div id="message-modal" class="message-modal" hidden aria-hidden="true">
+        <div class="message-modal__backdrop" data-modal-close="true"></div>
+        <section
+            class="message-modal__dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="message-modal-title"
+            aria-describedby="message-modal-text"
+        >
+            <h2 id="message-modal-title" class="message-modal__title">Alert</h2>
+            <p id="message-modal-text" class="message-modal__text"></p>
+            <div class="message-modal__actions">
+                <button id="message-modal-confirm" type="button" class="btn btn-primary">OK</button>
+            </div>
+        </section>
+    </div>
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
     <div id="celebration-layer" class="celebration-layer" aria-hidden="true"></div>
     <!-- App behavior -->
