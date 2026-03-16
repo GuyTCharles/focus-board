@@ -78,6 +78,10 @@
     const sortModeSelect = document.querySelector("#sort-mode");
     const themeToggle = document.querySelector("#theme-toggle");
     const composerPriorityInputs = Array.from(document.querySelectorAll("input[name='priority']"));
+    const messageModal = document.querySelector("#message-modal");
+    const messageModalTitle = document.querySelector("#message-modal-title");
+    const messageModalText = document.querySelector("#message-modal-text");
+    const messageModalConfirm = document.querySelector("#message-modal-confirm");
     const toastRegion = document.querySelector("#toast-region");
     const celebrationLayer = document.querySelector("#celebration-layer");
 
@@ -90,6 +94,7 @@
     let taskNotificationState = loadTaskNotificationState();
     let lastTimedRefreshKey = getTimedRefreshKey();
     let taskMetaLayoutFrame = 0;
+    let modalReturnFocusTarget = null;
 
     // In-memory state loaded once at startup.
     const tasks = loadTasks();
@@ -199,6 +204,42 @@
         });
         taskNotificationState = nextState;
         saveTaskNotificationState();
+    }
+
+    // Show validation and helper messages in an app-styled dialog that follows the current theme.
+    function showMessageModal(message, title = "Alert") {
+        if (!messageModal || !messageModalTitle || !messageModalText || !messageModalConfirm) {
+            window.alert(message);
+            return;
+        }
+
+        modalReturnFocusTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        messageModalTitle.textContent = title;
+        messageModalText.textContent = message;
+        messageModal.hidden = false;
+        messageModal.setAttribute("aria-hidden", "false");
+        document.body.classList.add("has-open-modal");
+
+        window.requestAnimationFrame(function () {
+            messageModalConfirm.focus();
+        });
+    }
+
+    // Close the shared message dialog and return focus when the original control still exists.
+    function hideMessageModal() {
+        if (!messageModal || messageModal.hidden) {
+            return;
+        }
+
+        const nextFocusTarget = modalReturnFocusTarget && modalReturnFocusTarget.isConnected ? modalReturnFocusTarget : null;
+        modalReturnFocusTarget = null;
+        messageModal.hidden = true;
+        messageModal.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("has-open-modal");
+
+        if (nextFocusTarget && typeof nextFocusTarget.focus === "function") {
+            nextFocusTarget.focus({ preventScroll: true });
+        }
     }
 
     // Build a lightweight toast with optional action and timed dismissal.
@@ -693,7 +734,7 @@
 
     // Explain why time cannot be entered until a due date exists.
     function promptForDateBeforeTime() {
-        alert(DATE_REQUIRED_FOR_TIME_MESSAGE);
+        showMessageModal(DATE_REQUIRED_FOR_TIME_MESSAGE);
     }
 
     // Keep disabled time wrappers visibly interactive for the date-required prompt.
@@ -858,7 +899,7 @@
             } else {
                 const normalizedDate = getISOFromDateInputElement(input);
                 if (isPastDate(normalizedDate)) {
-                    alert("Past dates are not allowed. Please choose today or a future date.");
+                    showMessageModal("Past dates are not allowed. Please choose today or a future date.");
                     input.dataset.isoDate = !isPastDate(previousIsoDate) ? previousIsoDate : "";
                 } else if (normalizedDate) {
                     input.dataset.isoDate = normalizedDate;
@@ -924,7 +965,7 @@
             } else {
                 const normalizedTime = normalizeDueTime(input.value);
                 if (minimumTime && normalizedTime && normalizedTime < minimumTime) {
-                    alert("Past times are not allowed for today. Please choose the current time or a future time.");
+                    showMessageModal("Past times are not allowed for today. Please choose the current time or a future time.");
                     input.dataset.isoTime = previousIsoTime && previousIsoTime >= minimumTime ? previousIsoTime : "";
                 } else if (normalizedTime) {
                     input.dataset.isoTime = normalizedTime;
@@ -1504,23 +1545,23 @@
         const normalizedDueTime = normalizedDueDate ? normalizeDueTime(dueTime) : "";
 
         if (!normalizedDescription) {
-            alert("Please add a task.");
+            showMessageModal("Please add a task.");
             return false;
         }
 
         if (/[<>]/.test(normalizedDescription)) {
-            alert("Please enter a valid task description without HTML characters.");
+            showMessageModal("Please enter a valid task description without HTML characters.");
             return false;
         }
 
         if (isPastDate(normalizedDueDate)) {
-            alert("Please choose today or a future date.");
+            showMessageModal("Please choose today or a future date.");
             syncDateInputPresentation(taskDueDateInput, IOS_DATE_PLACEHOLDER);
             return false;
         }
 
         if (isPastTimeForDate(normalizedDueDate, normalizedDueTime)) {
-            alert("Please choose the current time or a future time.");
+            showMessageModal("Please choose the current time or a future time.");
             return false;
         }
 
@@ -1575,13 +1616,13 @@
     function updateTaskDescription(index, description) {
         const normalizedDescription = normalizeDescription(description);
         if (!normalizedDescription) {
-            alert("Task description cannot be empty.");
+            showMessageModal("Task description cannot be empty.");
             renderTasks();
             return;
         }
 
         if (/[<>]/.test(normalizedDescription)) {
-            alert("Invalid input. HTML tags are not allowed.");
+            showMessageModal("Invalid input. HTML tags are not allowed.");
             renderTasks();
             return;
         }
@@ -1603,7 +1644,7 @@
         const normalizedDueDate = normalizeDueDate(dueDate);
 
         if (isPastDate(normalizedDueDate)) {
-            alert("Past dates are not allowed. Please choose today or a future date.");
+            showMessageModal("Past dates are not allowed. Please choose today or a future date.");
             renderTasks();
             return;
         }
@@ -1613,7 +1654,7 @@
             tasks[index].dueTime = "";
         } else if (isPastTimeForDate(normalizedDueDate, tasks[index].dueTime)) {
             tasks[index].dueTime = "";
-            alert("Past times are not allowed for today. Please choose the current time or a future time.");
+            showMessageModal("Past times are not allowed for today. Please choose the current time or a future time.");
         }
         saveTasks();
         syncNotificationsAndRender();
@@ -1634,7 +1675,7 @@
         }
 
         if (isPastTimeForDate(tasks[index].dueDate, normalizedDueTime)) {
-            alert("Past times are not allowed for today. Please choose the current time or a future time.");
+            showMessageModal("Past times are not allowed for today. Please choose the current time or a future time.");
             renderTasks();
             return;
         }
@@ -1730,6 +1771,18 @@
         applyTheme(currentTheme === "dark" ? "light" : "dark");
     });
 
+    if (messageModalConfirm) {
+        messageModalConfirm.addEventListener("click", hideMessageModal);
+    }
+
+    if (messageModal) {
+        messageModal.addEventListener("click", function (event) {
+            if (event.target && event.target.dataset.modalClose === "true") {
+                hideMessageModal();
+            }
+        });
+    }
+
     if (taskDueTimeResetButton) {
         taskDueTimeResetButton.addEventListener("click", function () {
             clearTimeInputValue(taskDueTimeInput);
@@ -1773,6 +1826,13 @@
     document.addEventListener("visibilitychange", function () {
         if (!document.hidden) {
             refreshTimedState(true);
+        }
+    });
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && messageModal && !messageModal.hidden) {
+            event.preventDefault();
+            hideMessageModal();
         }
     });
 
